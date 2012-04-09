@@ -60,6 +60,7 @@ data PackedObjectInfo = PackedObjectInfo
 	} deriving (Show,Eq)
 
 -- | Enumerate the pack refs available in this repository.
+packEnumerate :: FilePath -> IO [Ref]
 packEnumerate repoPath = map onlyHash . filter isPackFile <$> getDirectoryContents (repoPath </> "objects" </> "pack")
 	where
 		isPackFile x = ".pack" `isSuffixOf` x
@@ -75,6 +76,7 @@ packClose :: FileReader -> IO ()
 packClose = fileReaderClose
 
 -- | return the number of entries in this pack
+packReadHeader :: FilePath -> Ref -> IO Word32
 packReadHeader repoPath packRef =
 	withFileReader (packPath repoPath packRef) $ \filereader ->
 		fileReaderParse filereader parseHeader
@@ -86,10 +88,12 @@ packReadHeader repoPath packRef =
 		be32 <$> A.take 4
 
 -- | read an object at a specific position using a map function on the objectData
+packReadMapAtOffset :: FileReader -> Word64 -> (L.ByteString -> L.ByteString)
+                    -> IO (Maybe GitObject)
 packReadMapAtOffset fr offset mapData = fileReaderSeek fr offset >> getNextObject fr mapData
 
 -- | read an object at a specific position
-packReadAtOffset :: FileReader -> Word64 -> IO (Maybe Object)
+packReadAtOffset :: FileReader -> Word64 -> IO (Maybe GitObject)
 packReadAtOffset fr offset = packReadMapAtOffset fr offset id
 
 -- | read a raw representation at a specific position
@@ -97,6 +101,7 @@ packReadRawAtOffset :: FileReader -> Word64 -> IO (PackedObjectRaw)
 packReadRawAtOffset fr offset = fileReaderSeek fr offset >> getNextObjectRaw fr
 
 -- | enumerate all objects in this pack and callback to f for reach raw objects
+packEnumerateObjects :: FilePath -> Ref -> Int -> (PackedObjectRaw -> IO a) -> IO ()
 packEnumerateObjects repoPath packRef entries f =
 	withFileReader (packPath repoPath packRef) $ \filebuffer -> do
 		fileReaderSeek filebuffer 12
@@ -106,20 +111,31 @@ packEnumerateObjects repoPath packRef entries f =
 		parseNext _  0    = return ()
 		parseNext fr ents = getNextObjectRaw fr >>= f >> parseNext fr (ents-1)
 
-getNextObject :: FileReader -> (L.ByteString -> L.ByteString) -> IO (Maybe Object)
+getNextObject :: FileReader -> (L.ByteString -> L.ByteString) -> IO (Maybe GitObject)
 getNextObject fr mapData =
 	packedObjectToObject . second mapData <$> getNextObjectRaw fr
 
+packedObjectToObject :: (PackedObjectInfo, L.ByteString) -> Maybe GitObject
 packedObjectToObject (PackedObjectInfo { poiType = ty, poiExtra = extra }, objData) =
 	packObjectFromRaw (ty, extra, objData)
 
-packObjectFromRaw (TypeCommit, Nothing, objData) = AL.maybeResult $ AL.parse objectParseCommit objData
-packObjectFromRaw (TypeTree, Nothing, objData)   = AL.maybeResult $ AL.parse objectParseTree objData
-packObjectFromRaw (TypeBlob, Nothing, objData)   = AL.maybeResult $ AL.parse objectParseBlob objData
-packObjectFromRaw (TypeTag, Nothing, objData)    = AL.maybeResult $ AL.parse objectParseTag objData
-packObjectFromRaw (TypeDeltaOff, Just (PtrOfs o), objData) = objectWrap . DeltaOfs o <$> deltaRead objData
-packObjectFromRaw (TypeDeltaRef, Just (PtrRef r), objData) = objectWrap . DeltaRef r <$> deltaRead objData
-packObjectFromRaw _                              = error "can't happen unless someone change getNextObjectRaw"
+
+packObjectFromRaw :: (ObjectType, Maybe ObjectPtr, L.ByteString)
+                  -> Maybe GitObject
+packObjectFromRaw (TypeCommit, Nothing, objData) =
+    AL.maybeResult $ AL.parse commitParse objData
+packObjectFromRaw (TypeTree, Nothing, objData)   =
+    AL.maybeResult $ AL.parse treeParse objData
+packObjectFromRaw (TypeBlob, Nothing, objData)   =
+    AL.maybeResult $ AL.parse blobParse objData
+packObjectFromRaw (TypeTag, Nothing, objData)    =
+    AL.maybeResult $ AL.parse tagParse objData
+packObjectFromRaw (TypeDeltaOff, Just (PtrOfs o), objData) =
+    DeltaOfs o <$> deltaRead objData
+packObjectFromRaw (TypeDeltaRef, Just (PtrRef r), objData) =
+    DeltaRef r <$> deltaRead objData
+packObjectFromRaw _                              =
+    error "can't happen unless someone change getNextObjectRaw"
 
 getNextObjectRaw :: FileReader -> IO PackedObjectRaw
 getNextObjectRaw fr = do

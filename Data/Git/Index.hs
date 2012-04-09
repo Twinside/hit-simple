@@ -32,6 +32,8 @@ import System.FilePath
 import System.Directory
 import System.IO
 
+import qualified Data.ByteString as B
+
 import Data.List
 import Data.Bits
 import Data.Word
@@ -59,6 +61,7 @@ data Index = Index
 	}
 
 -- | enumerate every indexes file in the pack directory
+indexEnumerate :: FilePath -> IO [Ref]
 indexEnumerate repoPath = map onlyHash . filter isPackFile <$> getDirectoryContents (repoPath </> "objects" </> "pack")
 	where
 		isPackFile x = ".idx" `isSuffixOf` x && "pack-" `isPrefixOf` x
@@ -74,6 +77,7 @@ indexClose :: FileReader -> IO ()
 indexClose = fileReaderClose
 
 -- | variant of withFile on the index file and with a FileReader
+withIndex :: FilePath -> Ref -> (FileReader -> IO a) -> IO a
 withIndex repoPath indexRef = withFileReader (indexPath repoPath indexRef)
 
 -- | returns the number of references, referenced in this index.
@@ -138,6 +142,7 @@ indexGetReferencesWithPrefix idxHdr fr prefix =
 		refprefix   = read ("0x" ++ take 2 prefix)
 
 -- | returns absolute offset in the index file of the sha1s, the crcs and the packfiles offset.
+indexOffsets :: IndexHeader -> (Word32, Word32, Word32)
 indexOffsets idx = (indexSha1sOffset, indexCRCsOffset, indexPackOffOffset)
 	where
 		indexPackOffOffset = indexCRCsOffset + crcsTableSz
@@ -148,6 +153,7 @@ indexOffsets idx = (indexSha1sOffset, indexCRCsOffset, indexPackOffOffset)
 		sz                 = indexHeaderGetSize idx
 
 -- | parse index header
+parseIndexHeader :: A.Parser IndexHeader
 parseIndexHeader = do
 	magic   <- be32 <$> A.take 4
 	when (magic /= 0xff744f63) $ error "wrong magic number for index"
@@ -165,6 +171,9 @@ indexGetHeader :: FilePath -> Ref -> IO IndexHeader
 indexGetHeader repoPath indexRef = withIndex repoPath indexRef $ indexReadHeader
 
 -- | read all index
+indexRead :: FilePath -> Ref -> IO (IndexHeader, (Vector Ref, Vector Word32, Vector Word32,
+                                    [B.ByteString], Ref, Ref))
+
 indexRead repoPath indexRef = do
 	withIndex repoPath indexRef $ \fr -> do
 		idx <- fileReaderParse fr parseIndexHeader

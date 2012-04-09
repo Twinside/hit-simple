@@ -26,6 +26,7 @@ import Control.Monad (forM_)
 import qualified Crypto.Hash.SHA1 as SHA1
 import Data.ByteString (ByteString)
 import qualified Data.ByteString as B
+import qualified Data.ByteString.Lazy as L
 import qualified Data.ByteString.Internal as B (unsafeCreate)
 import qualified Data.ByteString.Unsafe as B (unsafeIndex)
 import qualified Data.ByteString.Char8 as BC
@@ -41,7 +42,10 @@ newtype Ref = Ref ByteString
 instance Show Ref where
 	show = BC.unpack . toHex
 
+isHex :: ByteString -> Bool
 isHex = and . map isHexDigit . BC.unpack
+
+isHexString :: String -> Bool
 isHexString = and . map isHexDigit
 
 -- | take a hexadecimal bytestring that represent a reference
@@ -125,6 +129,8 @@ toFilePathParts :: Ref -> (String, String)
 toFilePathParts ref = splitAt 2 $ show ref
 
 -- | hash a bytestring into a reference
+hash :: ByteString -> Ref
 hash = Ref . SHA1.hash
 
+hashLBS :: L.ByteString -> Ref
 hashLBS = Ref . SHA1.hashlazy

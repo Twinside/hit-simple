@@ -13,6 +13,7 @@ module Data.Git.Delta
 	, deltaApply
 	) where
 
+import Control.Applicative( (<$>), (<*>), many )
 import Data.Attoparsec
 import qualified Data.Attoparsec as A
 import qualified Data.Attoparsec.Lazy as AL
@@ -21,8 +22,6 @@ import qualified Data.ByteString as B
 import qualified Data.ByteString.Lazy as L
 import Data.Bits
 import Data.Word
-
-import Control.Applicative ((<$>), many)
 
 -- | a delta is a source size, a destination size and a list of delta cmd
 data Delta = Delta Word64 Word64 [DeltaCmd]
@@ -39,11 +38,9 @@ data DeltaCmd =
 -- * if first byte MSB is set, we copy from source.
 -- * otherwise, we copy from delta.
 -- * extensions are not handled.
-deltaParse = do
-	srcSize <- getDeltaHdrSize
-	resSize <- getDeltaHdrSize
-	dcmds   <- many (anyWord8 >>= parseWithCmd)
-	return $ Delta srcSize resSize dcmds
+deltaParse :: A.Parser Delta
+deltaParse = Delta <$> getDeltaHdrSize <*> getDeltaHdrSize
+                   <*> many (anyWord8 >>= parseWithCmd)
 	where
 		getDeltaHdrSize = do
 			z <- A.takeWhile (\w -> w `testBit` 7)
@@ -71,6 +68,7 @@ deltaParse = do
 			if cond then (flip shiftL sh . fromIntegral) <$> anyWord8 else return 0
 
 -- | read one delta from a lazy bytestring.
+deltaRead :: L.ByteString -> Maybe Delta
 deltaRead = AL.maybeResult . AL.parse deltaParse
 
 -- | apply a delta on a lazy bytestring, returning a new bytestring.
