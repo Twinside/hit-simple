@@ -11,6 +11,7 @@ module Data.Git.Object
 	, CommitInfo(..)
 	, TagInfo(..)
 	, ObjectInfo(..)
+	, TreeEnt
 	, objectTypeMarshall
 	, objectTypeUnmarshall
 	, objectToType 
