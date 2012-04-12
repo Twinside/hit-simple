@@ -20,8 +20,8 @@ module Data.Git.Pack
 	, packReadRawAtOffset
 	, packEnumerateObjects
 	-- * turn a packed object into a 
-	, packedObjectToObject
-	, packObjectFromRaw
+	{-, packedObjectToObject-}
+    , packObjectFromRaw
 	) where
 
 import Control.Applicative ((<$>))
@@ -41,11 +41,11 @@ import qualified Data.Attoparsec as A
 import qualified Data.Attoparsec.Lazy as AL
 
 import Data.Git.Internal
-import Data.Git.Path
 import Data.Git.Object
-import Data.Git.Delta
+{-import Data.Git.Delta-}
 import Data.Git.Ref
 import Data.Git.FileReader
+import Data.Git.Path
 
 import Data.Word
 
@@ -130,12 +130,7 @@ packObjectFromRaw (TypeBlob, Nothing, objData)   =
     AL.maybeResult $ AL.parse blobParse objData
 packObjectFromRaw (TypeTag, Nothing, objData)    =
     AL.maybeResult $ AL.parse tagParse objData
-packObjectFromRaw (TypeDeltaOff, Just (PtrOfs o), objData) =
-    DeltaOfs o <$> deltaRead objData
-packObjectFromRaw (TypeDeltaRef, Just (PtrRef r), objData) =
-    DeltaRef r <$> deltaRead objData
-packObjectFromRaw _                              =
-    error "can't happen unless someone change getNextObjectRaw"
+packObjectFromRaw _                              = Nothing
 
 getNextObjectRaw :: FileReader -> IO PackedObjectRaw
 getNextObjectRaw fr = do

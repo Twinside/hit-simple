@@ -45,8 +45,8 @@ import qualified Data.Attoparsec as A
 
 import Data.Git.Internal
 import Data.Git.FileReader
-import Data.Git.Path
 import Data.Git.Ref
+import Data.Git.Path
 
 -- | represent an index header with the version and the fanout table
 data IndexHeader = IndexHeader !Word32 !(Vector Word32)

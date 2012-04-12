@@ -1,40 +1,24 @@
--- |
--- Module      : Data.Git.Loose
--- License     : BSD-style
--- Maintainer  : Vincent Hanquez <vincent@snarc.org>
--- Stability   : experimental
--- Portability : unix
---
 {-# LANGUAGE OverloadedStrings, ScopedTypeVariables #-}
 module Data.Git.Loose
     (
     -- * marshall from and to lazy bytestring
       looseUnmarshall
     , looseUnmarshallRaw
-    , looseMarshall
+
     -- * read and check object existence
     , looseRead
     , looseReadHeader
     , looseReadRaw
     , looseExists
-    -- * write objects
-    , looseWriteBlobFromFile
-    , looseWrite
+
     -- * enumeration of loose objects
-    , looseEnumeratePrefixes
     , looseEnumerateWithPrefixFilter
-    , looseEnumerateWithPrefix
     ) where
 
 import Codec.Compression.Zlib
-import Data.Git.Ref
-import Data.Git.Path
-import Data.Git.FileWriter
-import Data.Git.Object
 
 import System.FilePath
 import System.Directory
-import System.IO (openFile, hFileSize, IOMode(..))
 
 import qualified Data.ByteString.Char8 as BC
 import qualified Data.ByteString.Lazy as L
@@ -43,15 +27,12 @@ import Data.Word( Word64 )
 import Data.Attoparsec.Lazy
 import qualified Data.Attoparsec.Char8 as PC
 import Control.Applicative ((<$>), (<|>), (<*))
-import Control.Monad
-import Control.Exception (onException, SomeException)
+import Control.Exception (SomeException)
 import qualified Control.Exception as E
 
-import Data.Char (isHexDigit)
-
-isObjectPrefix :: [Char] -> Bool
-isObjectPrefix [a,b] = isHexDigit a && isHexDigit b
-isObjectPrefix _     = False
+import Data.Git.Ref
+import Data.Git.Object
+import Data.Git.Path
 
 decimal :: Parser Int
 decimal = PC.decimal
@@ -111,10 +92,6 @@ looseRead repoPath ref = looseUnmarshall <$> L.readFile (objectPathOfRef repoPat
 looseExists :: FilePath -> Ref -> IO Bool
 looseExists repoPath ref = doesFileExist (objectPathOfRef repoPath ref)
 
--- | enumarate all prefixes available in the object store.
-looseEnumeratePrefixes :: FilePath -> IO [[Char]]
-looseEnumeratePrefixes repoPath = filter isObjectPrefix <$> getDirectoryContents (repoPath </> "objects")
-
 -- | enumerate all references available with a specific prefix.
 looseEnumerateWithPrefixFilter :: FilePath -> String -> (Ref -> Bool) -> IO [Ref]
 looseEnumerateWithPrefixFilter repoPath prefix filterF =
@@ -122,42 +99,4 @@ looseEnumerateWithPrefixFilter repoPath prefix filterF =
     where
         getDir p = E.catch (getDirectoryContents p) (\(_::SomeException) -> return [])
         isRef l = length l == 38
-
-looseEnumerateWithPrefix :: FilePath -> String -> IO [Ref]
-looseEnumerateWithPrefix repoPath prefix =
-    looseEnumerateWithPrefixFilter repoPath prefix (const True)
-
--- | marshall as lazy bytestring an object except deltas.
-looseMarshall :: GitObject -> L.ByteString
-looseMarshall obj
-    | objectIsDelta obj = error "cannot write delta object loose"
-    | otherwise         = compress $ L.concat [ L.fromChunks [hdrB], objData ]
-    where
-        objData = objectWrite obj
-        hdrB    = objectWriteHeader (objectToType obj) (fromIntegral $ L.length objData)
-
--- | create a new blob on a temporary location and on success move it to
--- the object store with its digest name.
-looseWriteBlobFromFile :: FilePath -> FilePath -> IO ()
-looseWriteBlobFromFile repoPath file = do
-    fsz <- openFile file ReadMode >>= hFileSize
-    let hdr = objectWriteHeader TypeBlob (fromIntegral fsz)
-    tmpPath <- objectTemporaryPath repoPath
-    flip onException (removeFile tmpPath) $ do
-        npath <- withFileWriter tmpPath $ \fw -> do
-            fileWriterOutput fw hdr
-            chunks <- L.toChunks <$> L.readFile file
-            mapM_ (fileWriterOutput fw) chunks
-            digest <- fileWriterGetDigest fw
-            return $ objectPathOfRef repoPath digest
-        exists <- doesFileExist npath
-        when exists $ error "destination already exists"
-        renameFile tmpPath npath
-
--- | write an object to disk as a loose reference.
--- use looseWriteBlobFromFile for efficiently writing blobs when being commited from a file.
-looseWrite :: FilePath -> GitObject -> IO ()
-looseWrite repoPath obj = L.writeFile (objectPathOfRef repoPath ref) content
-    where content = looseMarshall obj
-          ref     = hashLBS content
 

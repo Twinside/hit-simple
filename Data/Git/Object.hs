@@ -11,25 +11,20 @@ module Data.Git.Object
 	, CommitInfo(..)
 	, TagInfo(..)
 	, ObjectInfo(..)
-	, TreeEnt
-	, objectTypeMarshall
-	, objectTypeUnmarshall
-	, objectToType 
+	, TreeEntry
+	, FileRights
+	, CommitAuthor( .. )
+
+    , objectTypeUnmarshall
 	, objectTypeIsDelta
-	, objectIsDelta
 	-- * parsing function
 	, treeParse
 	, commitParse
 	, tagParse
 	, blobParse
-	-- * writing function
-	, objectWriteHeader
-	, objectWrite
-	, objectHash
 	) where
 
 import Data.Git.Ref
-import Data.Git.Delta
 
 import Data.ByteString (ByteString)
 import qualified Data.ByteString as B
@@ -44,7 +39,6 @@ import Control.Applicative ((<$>), many, (<*>), (<*), (*>) )
 import Control.Monad
 
 import Data.Word
-import Text.Printf
 
 -- | location of an object in the database
 data ObjectLocation = NotFound 
@@ -52,16 +46,25 @@ data ObjectLocation = NotFound
                     | Packed Ref Word64
                     deriving (Show,Eq)
 
--- | represent one entry in the tree
--- (permission,file or directory name,blob or tree ref)
--- name should maybe a filepath, but not sure about the encoding.
-type TreeEnt = (Int,ByteString,Ref)
+-- | Type defined only to get a meaningfull name in compilation
+-- errors and other data types
+type FileRights = Int
+
+-- | Represent one entry in the tree
+-- (permission,file or directory name, blob or tree ref)
+type TreeEntry = (FileRights, ByteString, Ref)
 
 -- | an author or committer line
 -- has the format: name <email> time timezone
 -- FIXME: should be a string, but I don't know if the data is stored
 -- consistantly in one encoding (UTF8)
-type Name = (ByteString,ByteString,Int,Int)
+data CommitAuthor = CommitAuthor
+    { authorName :: ByteString
+    , authorMail :: ByteString
+    , authorTimestamp :: Int
+    , authorTimezone  :: Int
+    }
+    deriving (Eq, Show)
 
 -- | type of a git object.
 data ObjectType =
@@ -95,27 +98,19 @@ data ObjectInfo = ObjectInfo
 -- | describe a git object, that could of 6 differents types:
 -- tree, blob, commit, tag and deltas (offset or ref).
 -- the deltas one are only available through packs.
-data GitObject = Tree { treeGetEnts :: [TreeEnt] }
-               | Blob { blobGetContent :: L.ByteString }
-               | Commit CommitInfo
-               | Tag    TagInfo
-               | DeltaOfs Word64 Delta
-               | DeltaRef Ref Delta
+data GitObject = Tree       [TreeEntry]  -- ^ Represent a folder with entry for children
+               | Blob       L.ByteString -- ^ Represent a content (file)
+               | Commit     CommitInfo   -- ^ Represent a commit, with associated informations
+               | Tag        TagInfo
+               {-| DeltaOfs Word64 Delta-}
+               {-| DeltaRef Ref Delta-}
                deriving (Eq, Show)
 
-objectToType :: GitObject -> ObjectType
-objectToType (Tree _) = TypeTree
-objectToType (Blob _) = TypeBlob
-objectToType (Commit _) = TypeCommit
-objectToType (Tag _) = TypeTag
-objectToType (DeltaOfs _ _) = TypeDeltaOff
-objectToType (DeltaRef _ _) = TypeDeltaRef
-
 data CommitInfo = CommitInfo
-	{ commitTreeish   :: Ref
+	{ commitTree      :: Ref
 	, commitParents   :: [Ref]
-	, commitAuthor    :: Name
-	, commitCommitter :: Name
+	, commitAuthor    :: CommitAuthor
+	, commitCommitter :: CommitAuthor
 	, commitMessage   :: ByteString
 	}
 	deriving (Show,Eq)
@@ -124,17 +119,10 @@ data TagInfo = TagInfo
 	{ tagRef        :: Ref
 	, tagObjectType :: ObjectType
 	, tagBlob       :: ByteString
-	, tagName       :: Name
+	, tagName       :: CommitAuthor
 	, tagS          :: ByteString
 	}
 	deriving (Show,Eq)
-
-objectTypeMarshall :: ObjectType -> String
-objectTypeMarshall TypeTree   = "tree"
-objectTypeMarshall TypeBlob   = "blob"
-objectTypeMarshall TypeCommit = "commit"
-objectTypeMarshall TypeTag    = "tag"
-objectTypeMarshall _          = error "deltas cannot be marshalled"
 
 objectTypeUnmarshall :: String -> ObjectType
 objectTypeUnmarshall "tree"   = TypeTree
@@ -147,11 +135,6 @@ objectTypeIsDelta :: ObjectType -> Bool
 objectTypeIsDelta TypeDeltaOff = True
 objectTypeIsDelta TypeDeltaRef = True
 objectTypeIsDelta _            = False
-
-objectIsDelta :: GitObject -> Bool
-objectIsDelta (DeltaOfs _ _) = True
-objectIsDelta (DeltaRef _ _) = True
-objectIsDelta _ = False
 
 -- | the enum instance is useful when marshalling to pack file.
 instance Enum ObjectType where
@@ -222,54 +205,10 @@ tagParse = Tag <$> tagInfo
                <*> (string "tagger " *> parseName) <* skipChar '\n'
                <*> takeByteString
 
-parseName :: A.Parser (ByteString, ByteString, Int, Int)
-parseName = (,,,)
+parseName :: A.Parser CommitAuthor
+parseName = CommitAuthor
          <$> (B.init <$> PC.takeWhile ((/=) '<')) <* skipChar '<'
          <*> PC.takeWhile ((/=) '>') <* string "> "
          <*> PC.decimal <* string " "
          <*> PC.signed PC.decimal <* skipChar '\n'
-
--- header of loose objects, but also useful for any object to determine object's hash
-objectWriteHeader :: ObjectType -> Word64 -> ByteString
-objectWriteHeader ty sz = BC.pack (objectTypeMarshall ty ++ " " ++ show sz ++ [ '\0' ])
-
-objectWrite :: GitObject-> L.ByteString
-objectWrite (Blob bData) = bData
-objectWrite (Tree ents) = L.fromChunks . concat $ map writeTreeEnt ents
-  where writeTreeEnt (perm,name,ref) =
-                [ BC.pack $ printf "%o" perm
-                , BC.singleton ' '
-                , name
-                , B.singleton 0
-                , toBinary ref
-                ]
-
-objectWrite (Commit (CommitInfo tree parents author committer msg)) =
-	L.fromChunks [BC.unlines ls, B.singleton 0xa, msg]
-	where
-		ls = [ "tree " `BC.append` (toHex tree) ] ++
-		     map (BC.append "parent " . toHex) parents ++
-		     [ writeName "author" author
-		     , writeName "committer" committer ]
-objectWrite (Tag (TagInfo ref ty tag tagger signature)) =
-	L.fromChunks [BC.unlines ls, B.singleton 0xa, signature]
-	where
-		ls = [ "object " `BC.append` (toHex ref)
-		     , "type " `BC.append` (BC.pack $ objectTypeMarshall ty)
-		     , "tag " `BC.append` tag
-		     , writeName "tagger" tagger ]
-
-objectWrite _ = error "Cannot marshal delta"
-
-
-objectHash :: ObjectType -> Word64 -> L.ByteString -> Ref
-objectHash ty w lbs = hashLBS $ L.fromChunks (objectWriteHeader ty w : L.toChunks lbs)
-
--- used for objectWrite for commit and tag
-writeName :: ByteString -> (ByteString, ByteString, Int, Int)
-          -> ByteString
-writeName label (name, email, time, tz) =
-	B.concat [label, " ", name, " <", email, "> ", BC.pack (show time), " ", BC.pack (showtz tz)]
-	where showtz i | i > 0 = "+" ++ show i
-	               | otherwise = show i
 

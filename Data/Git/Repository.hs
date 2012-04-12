@@ -1,16 +1,7 @@
 {-# LANGUAGE ScopedTypeVariables #-}
 {-# LANGUAGE ViewPatterns #-}
--- |
--- Module      : Data.Git.Repository
--- License     : BSD-style
--- Maintainer  : Vincent Hanquez <vincent@snarc.org>
--- Stability   : experimental
--- Portability : unix
---
 module Data.Git.Repository
     ( Git
-    , HTree
-    , HTreeEnt(..)
     , gitRepoPath
     , openRepo
     , closeRepo
@@ -21,55 +12,60 @@ module Data.Git.Repository
     , findObjectRaw
     , findObjectRawAt
     , findObject
-    , findCommit
-    , findTree
     , findObjectAt
-    , buildHTree
-    , resolvePath
-    , resolveTreeish
     , resolveRevision
     , initRepo
     , isRepo
+
+    -- * Named
+    -- ** Obtain a list of existing elements
+    , getBranchNames
+    , getTagNames
+    , getRemoteNames
+    , getRemoteBranchNames
+
+    -- ** Querying for existence
+	, doesHeadExist
+	, doesTagExist
+
+    -- ** Obtain the references of the elements
+    , readBranch 
+    , readTag
     ) where
 
 import System.Directory
 import System.FilePath
-import System.Environment
 
 import Control.Applicative ((<$>))
 import Control.Exception
-import qualified Control.Exception as E
 import Control.Monad
 
+import qualified Data.ByteString as B
+{-import qualified Data.ByteString.Char8 as BC-}
 import Data.Word
 import Data.IORef
-import Data.List ((\\), find, isPrefixOf)
-
-import Data.ByteString (ByteString)
+import Data.List ((\\), isPrefixOf)
 
 import Data.Git.Delta
 import Data.Git.FileReader
 import Data.Git.Index
 import Data.Git.Pack
-import Data.Git.Named
 import Data.Git.Object
 import Data.Git.Revision
 import Data.Git.Loose
 import Data.Git.Ref
+import Data.Git.Path
 
 data IndexReader = IndexReader IndexHeader FileReader
 
 -- | represent an git repo, with possibly already opened filereaders
 -- for indexes and packs
 data Git = Git
-    { gitRepoPath  :: FilePath
+    { gitRepoPath  :: FilePath      -- ^ Access the path where the repository is
+                                    -- placed
     , indexReaders :: IORef [(Ref, IndexReader)]
     , packReaders  :: IORef [(Ref, FileReader)]
     }
-
--- | hierarchy tree, either a reference to a blob (file) or a tree (directory).
-data HTreeEnt = TreeDir Ref HTree | TreeFile Ref
-type HTree = [(Int,ByteString,HTreeEnt)]
 
 -- | open a new git repository context
 openRepo :: FilePath -> IO Git
@@ -82,22 +78,15 @@ closeRepo (Git { indexReaders = ireaders, packReaders = preaders }) = do
     mapM_ (fileReaderClose . snd) =<< readIORef preaders
     where closeIndexReader (IndexReader _ fr) = fileReaderClose fr
 
--- | find the git repository from the current directory.
-findRepository :: IO FilePath
-findRepository = do
-    menvDir <- E.catch (Just <$> getEnv "GIT_DIR") (\(_:: SomeException) -> return Nothing)
-    case menvDir of
-        Nothing     -> checkDir 0
-        Just envDir -> do
-            e <- isRepo envDir
-            when (not e) $ error "environment GIT_DIR is not a git repository" 
-            return envDir
-    where
-        checkDir 128 = error "not a git repository"
-        checkDir n   = do
-            let filepath = concat (replicate n ("../") ++ [".git"])
-            e <- isRepo filepath
-            if e then return filepath else checkDir (n+1)
+-- | Find the nearest repository in the file tree starting
+-- at the given directory
+findRepository :: FilePath -> IO (Maybe FilePath)
+findRepository = inner ""
+  where inner prevDir dir | prevDir == dir || dir == "." = return Nothing
+        inner _ dir = do
+            isGitRepo <- isRepo $ dir </> ".git"
+            if isGitRepo then return $ Just dir
+                         else inner dir $ takeDirectory dir
 
 -- | execute a function f with a git context.
 withRepo :: FilePath -> (Git -> IO c) -> IO c
@@ -183,10 +172,10 @@ readRawFromPack git pref offset = do
     po <- packReadRawAtOffset reader offset
     return (reader, po)
 
-readFromPack :: Git -> Ref -> Word64 -> Bool -> IO (Maybe ObjectInfo)
-readFromPack git pref o resolveDelta = do
+readFromPack :: Git -> Ref -> Word64 -> IO (Maybe ObjectInfo)
+readFromPack git pref o = do
     (reader, x) <- readRawFromPack git pref o
-    if resolveDelta then resolve reader o x else return $ Just $ generifyHeader x
+    resolve reader o x
     where
         generifyHeader :: PackedObjectRaw -> ObjectInfo
         generifyHeader (po, objData) = ObjectInfo { oiHeader = hdr, oiData = objData, oiChains = [] }
@@ -202,7 +191,7 @@ readFromPack git pref o resolveDelta = do
                     return $ addToChain ptr $ applyDelta delta base
                 (TypeDeltaRef, Just ptr@(PtrRef bref)) -> do
                     let delta = deltaRead objData
-                    base <- findObjectRaw git bref True
+                    base <- findObjectRaw git bref
                     return $ addToChain ptr $ applyDelta delta base
                 _                                    -> return $ Just $ generifyHeader (po, objData)
 
@@ -218,54 +207,29 @@ readFromPack git pref o resolveDelta = do
 
 
 -- | get an object from repository
-findObjectRawAt :: Git -> ObjectLocation -> Bool -> IO (Maybe ObjectInfo)
-findObjectRawAt _   NotFound    _ = return Nothing
-findObjectRawAt git (Loose ref) _ = Just . (\(h,d)-> ObjectInfo h d[]) <$> looseReadRaw (gitRepoPath git) ref
-findObjectRawAt git (Packed pref o) resolveDelta = readFromPack git pref o resolveDelta
+findObjectRawAt :: Git -> ObjectLocation -> IO (Maybe ObjectInfo)
+findObjectRawAt _   NotFound    = return Nothing
+findObjectRawAt git (Loose ref) = Just . (\(h,d)-> ObjectInfo h d[]) <$> looseReadRaw (gitRepoPath git) ref
+findObjectRawAt git (Packed pref o) = readFromPack git pref o
 
 -- | get an object from repository
-findObjectRaw :: Git -> Ref -> Bool -> IO (Maybe ObjectInfo)
-findObjectRaw git ref resolveDelta = do
-    loc <- findReference git ref
-    findObjectRawAt git loc resolveDelta
-
--- | get an object type from repository
-findObjectType :: Git -> Ref -> IO (Maybe ObjectType)
-findObjectType git ref = findReference git ref >>= findObjectTypeAt
-    where
-        findObjectTypeAt NotFound        = return Nothing
-        findObjectTypeAt (Loose _)       = Just . (\(t,_,_) -> t) <$> looseReadHeader (gitRepoPath git) ref
-        findObjectTypeAt (Packed pref o) =
-            fmap ((\(ty,_,_) -> ty) . oiHeader) <$> readFromPack git pref o True
+findObjectRaw :: Git -> Ref -> IO (Maybe ObjectInfo)
+findObjectRaw git ref =
+    findReference git ref >>= findObjectRawAt git
 
 -- | get an object from repository using a location to reference it.
-findObjectAt :: Git -> ObjectLocation -> Bool
-             -> IO (Maybe GitObject)
-findObjectAt git loc resolveDelta = 
-  maybe Nothing toObject <$> findObjectRawAt git loc resolveDelta
+findObjectAt :: Git -> ObjectLocation -> IO (Maybe GitObject)
+findObjectAt git loc = 
+  maybe Nothing toObject <$> findObjectRawAt git loc
     where toObject (ObjectInfo { oiHeader = (ty, _, extra), oiData = objData }) =
                 packObjectFromRaw (ty, extra, objData)
 
 -- | get an object from repository using a ref.
-findObject :: Git -> Ref -> Bool -> IO (Maybe GitObject)
-findObject git ref resolveDelta = maybe Nothing toObject <$> findObjectRaw git ref resolveDelta
-    where
-        toObject (ObjectInfo { oiHeader = (ty, _, extra), oiData = objData }) = packObjectFromRaw (ty, extra, objData)
-
--- should be a standard function that do that...
-mapJustM :: Monad m => (t -> m (Maybe a)) -> Maybe t -> m (Maybe a)
-mapJustM f (Just o) = f o
-mapJustM _ Nothing  = return Nothing
-
-findCommit :: Git -> Ref -> IO (Maybe GitObject)
-findCommit git ref = findObject git ref True >>= mapJustM unwrap
-    where unwrap c@(Commit _) = return $ Just c
-          unwrap _            = return Nothing
-
-findTree :: Git -> Ref -> IO (Maybe GitObject)
-findTree git ref = findObject git ref True >>= mapJustM unwrap
-    where unwrap c@(Tree _) = return $ Just c
-          unwrap _          = return Nothing
+findObject :: Git -> Ref -> IO (Maybe GitObject)
+findObject git ref =
+  maybe Nothing toObject <$> findObjectRaw git ref
+    where toObject (ObjectInfo { oiHeader = (ty, _, extra), oiData = objData }) =
+                packObjectFromRaw (ty, extra, objData)
 
 -- | try to resolve a string to a specific commit ref
 -- for example: HEAD, HEAD^, master~3, shortRef
@@ -279,90 +243,41 @@ resolveRevision git (Revision prefix modifiers) = resolvePrefix >>= modf modifie
         resolvePrePrefix = do
             refs <- findReferencesWithPrefix git prefix
             case refs of
-                []  -> return Nothing
                 [r] -> return (Just r)
-                _   -> error "multiple references with this prefix"
+                _   -> return Nothing
 
-        fs = [ (specialExists, specialRead), (tagExists, tagRead), (headExists, headRead) ]
+        fs = [(doesTagExist, readTag), (doesHeadExist, readBranch)]
 
         resolveNamedPrefix []     = return Nothing
         resolveNamedPrefix (x:xs) = do
-            exists <- (fst x) (gitRepoPath git) prefix
+            exists <- (fst x) git prefix
             if exists
-                then Just <$> (snd x) (gitRepoPath git) prefix
+                then Just <$> (snd x) git prefix
                 else resolveNamedPrefix xs
     
         modf [] ref                  = return (Just ref)
+        modf (RevModParent 0:_ )   _ = return Nothing
         modf (RevModParent i:xs) ref = do
             parentRefs <- getParentRefs ref
-            case i of
-                0 -> error "revision modifier ^0 is not implemented"
-                _ -> case drop (i - 1) parentRefs of
-                    []    -> error "no such parent"
-                    (p:_) -> modf xs p
+            case drop (i - 1) parentRefs of
+               []    -> return Nothing -- error "no such parent"
+               (p:_) -> modf xs p
 
         modf (RevModParentFirstN 1:xs) ref = modf (RevModParent 1:xs) ref
         modf (RevModParentFirstN n:xs) ref = do
             parentRefs <- getParentRefs ref
-            modf (RevModParentFirstN (n-1):xs) (head parentRefs)
-        modf (_:_) _ = error "unimplemented revision modifier"
+            if null parentRefs
+               then return Nothing
+               else modf (RevModParentFirstN (n-1):xs) $ head parentRefs
+        modf (_:_) _ = return Nothing -- error "unimplemented revision modifier"
 
         getParentRefs ref = do
-            obj <- findCommit git ref
+            obj <- findObject git ref
             case obj of
                 Just (Commit (CommitInfo _ parents _ _ _)) -> return parents
-                Just _ -> error "reference in commit chain doesn't exists"
-                Nothing -> error "reference in commit chain doesn't exists"
+                Just _  -> return [] -- error "reference in commit chain doesn't exists"
+                Nothing -> return [] -- error "reference in commit chain doesn't exists"
 
--- | returns a tree from a ref that might be either a commit, a tree or a tag.
-resolveTreeish :: Git -> Ref -> IO (Maybe GitObject)
-resolveTreeish git ref = findObject git ref True >>= mapJustM recToTree where
-    recToTree (Commit (CommitInfo tree _ _ _ _)) = resolveTreeish git tree
-    recToTree (Tag (TagInfo tref _ _ _ _))    = resolveTreeish git tref
-    recToTree t@(Tree _)            = return $ Just t
-    recToTree _                                              = return Nothing
-
--- | build a hierarchy tree from a tree object
-buildHTree :: Git -> GitObject  -> IO HTree
-buildHTree git (Tree ents) = mapM resolveTree ents
-    where resolveTree (perm, ent, ref) = do
-               obj <- findObjectType git ref
-               case obj of
-                   Just TypeBlob -> return (perm, ent, TreeFile ref)
-                   Just TypeTree -> do
-                       ctree <- findTree git ref
-                       case ctree of
-                           Nothing -> error "unknown reference in tree object: no such child"
-                           Just t  -> do
-                               dir   <- buildHTree git t
-                               return (perm, ent, TreeDir ref dir)
-                   Just _        -> error "wrong type embedded in tree object"
-                   Nothing       -> error "unknown reference in tree object"
-buildHTree _git _ = error "Stoupid buildHTree"
-
--- | resolve the ref (tree or blob) related to a path at a specific commit ref
-resolvePath :: Git -> Ref -> [ByteString] -> IO (Maybe Ref)
-resolvePath git commitRef paths = do
-    commit <- findCommit git commitRef
-    case commit of
-        Just (Commit (CommitInfo tree _ _ _ _)) -> resolve tree paths
-        _                    -> error ("not a valid ref: " ++ show commitRef)
-    where
-        resolve :: Ref -> [ByteString] -> IO (Maybe Ref)
-        resolve treeRef []     = return $ Just treeRef
-        resolve treeRef (x:xs) = do
-            tree <- findTree git treeRef
-            case tree of
-                Just (Tree ents) -> do
-                    let cEnt = treeEntRef <$> findEnt x ents
-                    if xs == []
-                        then return cEnt
-                        else maybe (return Nothing) (\z -> resolve z xs) cEnt
-                _          -> error ("not a valid ref: " ++ show treeRef)
-
-        findEnt x = find (\(_, b, _) -> b == x)
-        treeEntRef (_,_,r) = r
-    
 -- | basic checks to see if a specific path looks like a git repo.
 isRepo :: FilePath -> IO Bool
 isRepo path = do
@@ -383,3 +298,56 @@ initRepo path = do
         ["branches","hooks","info"
         ,"logs","objects","refs"
         ,"refs"</>"heads","refs"</>"tags"]
+
+getDirectoryContentNoDots :: FilePath -> IO [String]
+getDirectoryContentNoDots path = filter noDot <$> getDirectoryContents path
+	where noDot = (not . isPrefixOf ".")
+
+getBranchNames :: Git -> IO [String]
+getBranchNames (Git { gitRepoPath = path }) =
+    getDirectoryContentNoDots $ headsPath path
+
+getTagNames :: Git -> IO [String]
+getTagNames (Git { gitRepoPath = path }) = 
+    getDirectoryContentNoDots $ tagsPath path
+
+getRemoteNames :: Git -> IO [String]
+getRemoteNames (Git { gitRepoPath = path }) =
+    getDirectoryContentNoDots $ remotesPath path
+
+getRemoteBranchNames :: Git -> String -> IO [String]
+getRemoteBranchNames (Git { gitRepoPath = path }) =
+    getDirectoryContentNoDots . remotePath path
+
+readRef :: FilePath -> IO Ref
+readRef path = fromHex . B.take 40 <$> B.readFile path
+
+{-writeRef :: FilePath -> Ref -> IO ()-}
+{-writeRef path ref = B.writeFile path (B.concat [toHex ref, B.singleton 0xa])-}
+
+{-readRefAndFollow :: String -> FilePath -> IO Ref-}
+{-readRefAndFollow gitRepo path = do-}
+	{-content <- B.readFile path-}
+	{-if (BC.pack "ref: ") `B.isPrefixOf` content-}
+		{-then do -- BC.unpack should be utf8.toString, and the whole thing is really fragile. need to do the proper thing.-}
+			{-let file = BC.unpack $ BC.init $ B.drop 5 content-}
+			{-readRefAndFollow gitRepo (gitRepo ++ "/" ++ file)-}
+		{-else return (fromHex $ B.take 40 content)-}
+
+-- | Query the git repository to see if a given branch exists
+doesHeadExist :: Git -> String -> IO Bool
+doesHeadExist (Git { gitRepoPath = repo }) = doesFileExist . headPath repo
+
+-- | Query the git repository to see if a given tag exists
+doesTagExist :: Git -> String -> IO Bool
+doesTagExist (Git { gitRepoPath = repo }) = doesFileExist . tagPath repo
+
+readTag :: Git -> String -> IO Ref
+readTag (Git { gitRepoPath = repo }) = readRef . tagPath repo
+
+readBranch :: Git -> String -> IO Ref
+readBranch (Git { gitRepoPath = repo }) = readRef . headPath repo
+
+{-headWrite :: FilePath -> FilePath -> Ref -> IO ()-}
+{-headWrite gitRepo name ref = writeRef (headPath gitRepo name) ref-}
+
