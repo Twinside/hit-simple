@@ -40,17 +40,20 @@ Library
                    , zlib
                    , zlib-bindings >= 0.0.1 && < 0.1
                    , bytedump
+
   Exposed-modules:   Data.Git
-                     Data.Git.Index
-                     Data.Git.Pack
                      Data.Git.Object
-                     Data.Git.Loose
-                     Data.Git.Delta
                      Data.Git.Ref
                      Data.Git.Revision
                      Data.Git.Repository
+
   Other-modules:     Data.Git.Internal
                      Data.Git.FileReader
+                     Data.Git.Loose
+                     Data.Git.Delta
+                     Data.Git.Index
+                     Data.Git.Pack
+                     Data.Git.Path
 
   ghc-options:       -Wall -fno-warn-missing-signatures
 

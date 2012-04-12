@@ -9,10 +9,7 @@ module Data.Git.Repository
     , findRepository
     , findReference
     , findReferencesWithPrefix
-    , findObjectRaw
-    , findObjectRawAt
     , findObject
-    , findObjectAt
     , resolveRevision
     , initRepo
     , isRepo
@@ -217,14 +214,15 @@ findObjectRaw :: Git -> Ref -> IO (Maybe ObjectInfo)
 findObjectRaw git ref =
     findReference git ref >>= findObjectRawAt git
 
--- | get an object from repository using a location to reference it.
-findObjectAt :: Git -> ObjectLocation -> IO (Maybe GitObject)
-findObjectAt git loc = 
-  maybe Nothing toObject <$> findObjectRawAt git loc
-    where toObject (ObjectInfo { oiHeader = (ty, _, extra), oiData = objData }) =
-                packObjectFromRaw (ty, extra, objData)
+-- get an object from repository using a location to reference it.
+{-findObjectAt :: Git -> ObjectLocation -> IO (Maybe GitObject)-}
+{-findObjectAt git loc = -}
+  {-maybe Nothing toObject <$> findObjectRawAt git loc-}
+    {-where toObject (ObjectInfo { oiHeader = (ty, _, extra), oiData = objData }) =-}
+                {-packObjectFromRaw (ty, extra, objData)-}
 
--- | get an object from repository using a ref.
+-- | Get an object from repository, with a sha1.
+-- All delta are resolved internally
 findObject :: Git -> Ref -> IO (Maybe GitObject)
 findObject git ref =
   maybe Nothing toObject <$> findObjectRaw git ref
@@ -303,18 +301,26 @@ getDirectoryContentNoDots :: FilePath -> IO [String]
 getDirectoryContentNoDots path = filter noDot <$> getDirectoryContents path
 	where noDot = (not . isPrefixOf ".")
 
+-- | This function will fetch the list of known local
+-- branches
 getBranchNames :: Git -> IO [String]
 getBranchNames (Git { gitRepoPath = path }) =
     getDirectoryContentNoDots $ headsPath path
 
+-- | This function will fetch the list of tags declared in the
+-- repository.
 getTagNames :: Git -> IO [String]
 getTagNames (Git { gitRepoPath = path }) = 
     getDirectoryContentNoDots $ tagsPath path
 
+-- | This functions will fetch the list of remotes (distant
+-- repository) known in the repository.
 getRemoteNames :: Git -> IO [String]
 getRemoteNames (Git { gitRepoPath = path }) =
     getDirectoryContentNoDots $ remotesPath path
 
+-- | Given a repository and remote name, will fetch all
+-- the known branches
 getRemoteBranchNames :: Git -> String -> IO [String]
 getRemoteBranchNames (Git { gitRepoPath = path }) =
     getDirectoryContentNoDots . remotePath path

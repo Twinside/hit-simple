@@ -102,8 +102,6 @@ data GitObject = Tree       [TreeEntry]  -- ^ Represent a folder with entry for 
                | Blob       L.ByteString -- ^ Represent a content (file)
                | Commit     CommitInfo   -- ^ Represent a commit, with associated informations
                | Tag        TagInfo
-               {-| DeltaOfs Word64 Delta-}
-               {-| DeltaRef Ref Delta-}
                deriving (Eq, Show)
 
 data CommitInfo = CommitInfo
