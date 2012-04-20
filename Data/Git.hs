@@ -13,6 +13,7 @@ module Data.Git(
 
                -- * Find named elements
                -- ** Obtain a list of existing elements
+               , getHead
                , getBranchNames
                , getTagNames
                , getRemoteNames

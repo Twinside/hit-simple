@@ -16,6 +16,7 @@ module Data.Git.Repository
 
     -- * Named
     -- ** Obtain a list of existing elements
+    , getHead
     , getBranchNames
     , getTagNames
     , getRemoteNames
@@ -300,6 +301,16 @@ initRepo path = do
 getDirectoryContentNoDots :: FilePath -> IO [String]
 getDirectoryContentNoDots path = filter noDot <$> getDirectoryContents path
 	where noDot = (not . isPrefixOf ".")
+
+-- | Obtain the current head of the repository.
+getHead :: Git -> IO (Maybe Ref)
+getHead (Git { gitRepoPath = path }) = do
+    content <- readFile $ path </> "HEAD"
+    case content of
+        ('r':'e':'f':':':' ':fname) ->
+            Just <$> readRef (path </> head (lines fname))
+        _ -> return Nothing
+
 
 -- | This function will fetch the list of known local
 -- branches
