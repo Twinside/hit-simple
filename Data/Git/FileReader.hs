@@ -82,7 +82,9 @@ fileReaderGetNext fb = do
 		b <- B.hGet (fbHandle fb) 4096
 		if B.null b
 			then finishInflate (fbInflate fb)
-			else maybe inflateTillPop return =<< withInflateInput (fbInflate fb) b id
+			else do
+				popper <- feedInflate (fbInflate fb) b
+				popper >>= maybe inflateTillPop return
 
 fileReaderGetPos :: FileReader -> IO Word64
 fileReaderGetPos fr = do
@@ -156,12 +158,19 @@ fileReaderInflateToSize fb@(FileReader { fbRemaining = ref }) outputSize = do
 			else return [dbs]
 
 -- lowlevel helpers to inflate only to a specific size.
-
+inflateNew :: IO (ForeignPtr ZStreamStruct)
 inflateNew = do
 	zstr <- zstreamNew
 	inflateInit2 zstr defaultWindowBits
 	newForeignPtr c_free_z_stream_inflate zstr
 
+
+inflateToSize :: ForeignPtr ZStreamStruct
+              -> Int
+              -> Bool
+              -> ByteString
+              -> IO ByteString
+              -> IO (ByteString, ByteString)
 inflateToSize inflate sz isLastBlock ibs nextBs = withForeignPtr inflate $ \zstr -> do
 	let boundSz = min defaultChunkSize sz
 	-- create an output buffer

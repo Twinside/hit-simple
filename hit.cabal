@@ -38,7 +38,7 @@ Library
                    , vector
                    , random
                    , zlib
-                   , zlib-bindings >= 0.0.1 && < 0.1
+                   , zlib-bindings >= 0.1 && < 0.2
                    , bytedump
 
   Exposed-modules:   Data.Git
