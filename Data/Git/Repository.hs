@@ -282,9 +282,7 @@ isRepo :: FilePath -> IO Bool
 isRepo path = do
     dir     <- doesDirectoryExist path
     subDirs <- mapM (doesDirectoryExist . (path </>))
-        ["branches","hooks","info"
-        ,"logs","objects","refs"
-        ,"refs"</>"heads","refs"</>"tags"]
+                    ["objects","refs"</>"heads","refs"</>"tags"]
     return $ and ([dir] ++ subDirs)
 
 -- | initialize a new repository at a specific location.
