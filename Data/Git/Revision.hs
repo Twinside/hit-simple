@@ -24,9 +24,25 @@ data RevModifier =
     | RevModAtN Int          -- ^ @{n} accessor
     deriving (Eq)
 
+-- | A revision is complex git accessor like `HEAD~3`
 data Revision = Revision String [RevModifier]
     deriving (Eq)
 
+-- | Parse the following Git references
+--
+-- syntax is REF, the current reference (branch, HEAD...)
+-- and accept a combinaison of the following modifiers :
+--
+--  * REF^n where n represent the nieth parent
+                    --
+--  * REF~n where n represent the nieth first parent
+                    --
+--  * REF\@\{type} where type can be `tree`, `commit`, `blob` or `tag`
+                           --
+--  * REF\@\{date}
+--
+--  * REF\@\{n}
+--
 revFromString :: String -> Revision
 revFromString s = either (error.show) id $ parse parser "" s
      where parser = Revision <$> many (noneOf "^~@")

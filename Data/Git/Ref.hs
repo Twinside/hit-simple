@@ -35,7 +35,7 @@ import Data.Char (isHexDigit)
 
 import Foreign.Storable
 
--- | represent a git reference (SHA1)
+-- | Represent a git reference (SHA1)
 newtype Ref = Ref ByteString
 	deriving (Eq,Ord)
 
@@ -105,8 +105,8 @@ toHex (Ref bs) = B.unsafeCreate 40 populateHex
 toHexString :: Ref -> String
 toHexString = BC.unpack . toHex
 
--- | transform a bytestring that represent a binary bytestring
--- and returns a ref.
+-- | Transform a ByteString that represent a sha1
+-- ref and return a ref
 fromBinary :: ByteString -> Ref
 fromBinary b
 	| B.length b == 20 = Ref b

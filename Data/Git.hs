@@ -34,7 +34,24 @@ module Data.Git(
                , TagInfo(..)
                , FileRights
                , TreeEntry
+
+               -- * Reference conversion
+               , Ref
+               , toHexString
+               , toBinary
+               , fromHexString 
+               , fromBinary
+               , toHex
+               , fromHex
+
+               -- * Revisions
+               , Revision
+               , revFromString
+               , resolveRevision
                ) where
 
-import Data.Git.Repository
 import Data.Git.Object
+import Data.Git.Ref
+import Data.Git.Repository
+import Data.Git.Revision
+

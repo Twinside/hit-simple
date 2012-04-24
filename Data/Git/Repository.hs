@@ -11,7 +11,6 @@ module Data.Git.Repository
     , findReferencesWithPrefix
     , findObject
     , resolveRevision
-    , initRepo
     , isRepo
 
     -- * Named
@@ -215,13 +214,6 @@ findObjectRaw :: Git -> Ref -> IO (Maybe ObjectInfo)
 findObjectRaw git ref =
     findReference git ref >>= findObjectRawAt git
 
--- get an object from repository using a location to reference it.
-{-findObjectAt :: Git -> ObjectLocation -> IO (Maybe GitObject)-}
-{-findObjectAt git loc = -}
-  {-maybe Nothing toObject <$> findObjectRawAt git loc-}
-    {-where toObject (ObjectInfo { oiHeader = (ty, _, extra), oiData = objData }) =-}
-                {-packObjectFromRaw (ty, extra, objData)-}
-
 -- | Get an object from repository, with a sha1.
 -- All delta are resolved internally
 findObject :: Git -> Ref -> IO (Maybe GitObject)
@@ -285,17 +277,6 @@ isRepo path = do
                     ["objects","refs"</>"heads","refs"</>"tags"]
     return $ and ([dir] ++ subDirs)
 
--- | initialize a new repository at a specific location.
-initRepo :: FilePath -> IO ()
-initRepo path = do
-    exists <- doesDirectoryExist path
-    when exists $ error "destination directory already exists"
-    createDirectory path
-    mapM_ (createDirectory . (path </>))
-        ["branches","hooks","info"
-        ,"logs","objects","refs"
-        ,"refs"</>"heads","refs"</>"tags"]
-
 getDirectoryContentNoDots :: FilePath -> IO [String]
 getDirectoryContentNoDots path = filter noDot <$> getDirectoryContents path
 	where noDot = (not . isPrefixOf ".")
@@ -337,18 +318,6 @@ getRemoteBranchNames (Git { gitRepoPath = path }) =
 readRef :: FilePath -> IO Ref
 readRef path = fromHex . B.take 40 <$> B.readFile path
 
-{-writeRef :: FilePath -> Ref -> IO ()-}
-{-writeRef path ref = B.writeFile path (B.concat [toHex ref, B.singleton 0xa])-}
-
-{-readRefAndFollow :: String -> FilePath -> IO Ref-}
-{-readRefAndFollow gitRepo path = do-}
-	{-content <- B.readFile path-}
-	{-if (BC.pack "ref: ") `B.isPrefixOf` content-}
-		{-then do -- BC.unpack should be utf8.toString, and the whole thing is really fragile. need to do the proper thing.-}
-			{-let file = BC.unpack $ BC.init $ B.drop 5 content-}
-			{-readRefAndFollow gitRepo (gitRepo ++ "/" ++ file)-}
-		{-else return (fromHex $ B.take 40 content)-}
-
 -- | Query the git repository to see if a given branch exists
 doesHeadExist :: Git -> String -> IO Bool
 doesHeadExist (Git { gitRepoPath = repo }) = doesFileExist . headPath repo
@@ -362,7 +331,4 @@ readTag (Git { gitRepoPath = repo }) = readRef . tagPath repo
 
 readBranch :: Git -> String -> IO Ref
 readBranch (Git { gitRepoPath = repo }) = readRef . headPath repo
-
-{-headWrite :: FilePath -> FilePath -> Ref -> IO ()-}
-{-headWrite gitRepo name ref = writeRef (headPath gitRepo name) ref-}
 
