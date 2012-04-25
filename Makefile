@@ -25,8 +25,6 @@ pack:
 	cp hit.cabal hit-$(HIT_VERSION)
 	cp Setup.hs hit-$(HIT_VERSION)
 	cp README.md hit-$(HIT_VERSION)
-	cp Hit.hs hit-$(HIT_VERSION)
-	cp Tests.hs hit-$(HIT_VERSION)
 	cp LICENSE hit-$(HIT_VERSION)
 	tar cvf hit-$(HIT_VERSION).tar hit-$(HIT_VERSION)
 	gzip hit-$(HIT_VERSION).tar
