@@ -1,4 +1,4 @@
-Name:                hit
+Name:                hit-simple
 Version:             0.3
 Synopsis:            Git operations
 Description:         Provides low level git operations
@@ -6,17 +6,17 @@ License:             BSD3
 License-file:        LICENSE
 Copyright:           Vincent Hanquez <vincent@snarc.org>
 Author:              Vincent Hanquez <vincent@snarc.org>
-Maintainer:          Vincent Hanquez <vincent@snarc.org>
+Maintainer:          Vincent Berthoux <vincent.berthoux@gmail.com>
 Category:            Development
 Stability:           experimental
 Build-Type:          Simple
-Homepage:            http://github.com/vincenthz/hit
+Homepage:            http://github.com/Twinside/hit-simple
 Cabal-Version:       >=1.6
 data-files:          README.md
 
 source-repository head
   type: git
-  location: git://github.com/Twinside/hit
+  location: git://github.com/Twinside/hit-simple
 
 Library
   Ghc-Options: -O2 -Wall
