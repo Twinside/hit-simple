@@ -26,6 +26,7 @@ module Data.Git(
                -- ** Obtain the references of the elements
                , readBranch 
                , readTag
+               , readRemoteBranch
 
                -- * Git objects
                , GitObject(..)

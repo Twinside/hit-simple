@@ -28,6 +28,7 @@ module Data.Git.Repository
     -- ** Obtain the references of the elements
     , readBranch 
     , readTag
+    , readRemoteBranch 
     ) where
 
 import System.Directory
@@ -331,4 +332,8 @@ readTag (Git { gitRepoPath = repo }) = readRef . tagPath repo
 
 readBranch :: Git -> String -> IO Ref
 readBranch (Git { gitRepoPath = repo }) = readRef . headPath repo
+
+readRemoteBranch :: Git -> String -> String -> IO Ref
+readRemoteBranch (Git { gitRepoPath = repo }) branch =
+    readRef . remoteEntPath repo branch
 
