@@ -22,11 +22,11 @@ data RevModifier =
     | RevModAtType String    -- ^ @{type} accessor
     | RevModAtDate String    -- ^ @{date} accessor
     | RevModAtN Int          -- ^ @{n} accessor
-    deriving (Eq)
+    deriving (Eq, Show)
 
 -- | A revision is complex git accessor like `HEAD~3`
 data Revision = Revision String [RevModifier]
-    deriving (Eq)
+    deriving (Eq, Show)
 
 -- | Parse the following Git references
 --

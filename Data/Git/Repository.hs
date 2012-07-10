@@ -24,6 +24,7 @@ module Data.Git.Repository
     -- ** Querying for existence
 	, doesHeadExist
 	, doesTagExist
+	, doesRemoteHeadExist
 
     -- ** Obtain the references of the elements
     , readBranch 
@@ -223,53 +224,66 @@ findObject git ref =
     where toObject (ObjectInfo { oiHeader = (ty, _, extra), oiData = objData }) =
                 packObjectFromRaw (ty, extra, objData)
 
+getParentRefs :: Git -> Ref -> IO [Ref]
+getParentRefs git ref = do
+  obj <- findObject git ref
+  case obj of
+      Just (Commit (CommitInfo _ parents _ _ _)) -> return parents
+      Just _  -> return [] -- error "reference in commit chain doesn't exists"
+      Nothing -> return [] -- error "reference in commit chain doesn't exists"
+
+walkRevisionModifier :: Git -> [RevModifier] -> Ref -> IO (Maybe Ref)
+walkRevisionModifier _git [] ref                  = return $ Just ref
+walkRevisionModifier _git (RevModParent 0:_ )   _ = return Nothing
+walkRevisionModifier git (RevModParent i:xs) ref = do
+    parentRefs <- getParentRefs git ref
+    case drop (i - 1) parentRefs of
+        []    -> return Nothing
+        (p:_) -> walkRevisionModifier git xs p
+walkRevisionModifier git (RevModParentFirstN 1:xs) ref =
+    walkRevisionModifier git (RevModParent 1:xs) ref
+walkRevisionModifier git (RevModParentFirstN n:xs) ref = do
+    parentRefs <- getParentRefs git ref
+    case parentRefs of
+       [] -> return Nothing
+       (pref:_) -> walkRevisionModifier git (RevModParentFirstN (n-1):xs) pref
+walkRevisionModifier _ _ _ = return Nothing
+
 -- | try to resolve a string to a specific commit ref
 -- for example: HEAD, HEAD^, master~3, shortRef
 resolveRevision :: Git -> Revision -> IO (Maybe Ref)
-resolveRevision git (Revision prefix modifiers) = resolvePrefix >>= modf modifiers
-    where
-        resolvePrefix :: IO Ref
-        resolvePrefix = resolveNamedPrefix fs >>= maybe resolvePrePrefix (return . Just) >>= maybe (return $ fromHexString prefix) return
+resolveRevision git (Revision prefix modifiers) =
+  resolvePrefix >>= walkRevisionModifier git modifiers
+    where (branch, slashBranch) = break (== '/') prefix
+          resolvePrefix :: IO Ref
+          resolvePrefix = resolveNamedPrefix fs
+                      >>= maybe resolvePrePrefix (return . Just)
+                      >>= maybe (return $ fromHexString prefix) return
 
-        resolvePrePrefix :: IO (Maybe Ref)
-        resolvePrePrefix = do
-            refs <- findReferencesWithPrefix git prefix
-            case refs of
-                [r] -> return (Just r)
-                _   -> return Nothing
+          resolvePrePrefix :: IO (Maybe Ref)
+          resolvePrePrefix = do
+              refs <- findReferencesWithPrefix git prefix
+              case refs of
+                  [r] -> return (Just r)
+                  _   -> return Nothing
 
-        fs = [(doesTagExist, readTag), (doesHeadExist, readBranch)]
+          fs = [(doesTagExist, readTag),
+                (doesHeadExist, readBranch)]
+          
+          resolveNamedPrefix []     = return Nothing
+          resolveNamedPrefix _ | not $ null slashBranch = do
+              let branchName = tail slashBranch
+              exists <- doesRemoteHeadExist git branch branchName
+              if exists
+                  then Just <$> readRemoteBranch git branch branchName
+                  else return Nothing
 
-        resolveNamedPrefix []     = return Nothing
-        resolveNamedPrefix (x:xs) = do
-            exists <- (fst x) git prefix
-            if exists
-                then Just <$> (snd x) git prefix
-                else resolveNamedPrefix xs
+          resolveNamedPrefix (x:xs) = do
+              exists <- (fst x) git prefix
+              if exists
+                  then Just <$> (snd x) git prefix
+                  else resolveNamedPrefix xs
     
-        modf [] ref                  = return (Just ref)
-        modf (RevModParent 0:_ )   _ = return Nothing
-        modf (RevModParent i:xs) ref = do
-            parentRefs <- getParentRefs ref
-            case drop (i - 1) parentRefs of
-               []    -> return Nothing -- error "no such parent"
-               (p:_) -> modf xs p
-
-        modf (RevModParentFirstN 1:xs) ref = modf (RevModParent 1:xs) ref
-        modf (RevModParentFirstN n:xs) ref = do
-            parentRefs <- getParentRefs ref
-            if null parentRefs
-               then return Nothing
-               else modf (RevModParentFirstN (n-1):xs) $ head parentRefs
-        modf (_:_) _ = return Nothing -- error "unimplemented revision modifier"
-
-        getParentRefs ref = do
-            obj <- findObject git ref
-            case obj of
-                Just (Commit (CommitInfo _ parents _ _ _)) -> return parents
-                Just _  -> return [] -- error "reference in commit chain doesn't exists"
-                Nothing -> return [] -- error "reference in commit chain doesn't exists"
-
 -- | basic checks to see if a specific path looks like a git repo.
 isRepo :: FilePath -> IO Bool
 isRepo path = do
@@ -318,6 +332,10 @@ getRemoteBranchNames (Git { gitRepoPath = path }) =
 
 readRef :: FilePath -> IO Ref
 readRef path = fromHex . B.take 40 <$> B.readFile path
+
+doesRemoteHeadExist :: Git -> String -> String -> IO Bool
+doesRemoteHeadExist (Git { gitRepoPath = repo }) branch =
+    doesFileExist . remoteEntPath repo branch
 
 -- | Query the git repository to see if a given branch exists
 doesHeadExist :: Git -> String -> IO Bool

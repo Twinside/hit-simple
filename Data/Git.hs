@@ -22,6 +22,7 @@ module Data.Git(
                -- ** Querying for existence
                , doesHeadExist
                , doesTagExist
+               , doesRemoteHeadExist
 
                -- ** Obtain the references of the elements
                , readBranch 
