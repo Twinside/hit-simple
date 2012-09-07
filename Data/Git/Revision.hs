@@ -43,8 +43,10 @@ data Revision = Revision String [RevModifier]
 --
 --  * REF\@\{n}
 --
-revFromString :: String -> Revision
-revFromString s = either (error.show) id $ parse parser "" s
+revFromString :: String -> Either String Revision
+revFromString s = case parse parser "" s of
+        Left err -> Left $ show err
+        Right v  -> Right v
      where parser = Revision <$> many (noneOf "^~@")
                              <*> many (choice [parseParent, parseFirstParent, parseAt])
 
