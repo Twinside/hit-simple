@@ -40,7 +40,7 @@ decimal = PC.decimal
 -- loose object parsing
 parseHeader :: Parser (ObjectType, Word64, Maybe a)
 parseHeader = do
-    h <- takeWhile1 ((/=) 0x20) <* word8 0x20
+    h <- takeWhile1 (/= 0x20) <* word8 0x20
     sz <- decimal
     return (objectTypeUnmarshall $ BC.unpack h, fromIntegral sz, Nothing)
 
@@ -66,7 +66,7 @@ looseUnmarshall = parseObject . decompress
 looseUnmarshallRaw :: L.ByteString -> (ObjectHeader, ObjectData)
 looseUnmarshallRaw l =
     let dl = decompress l in
-    let i = L.findIndex ((==) 0) dl in
+    let i = L.findIndex (== 0) dl in
     case i of
         Nothing  -> error "object not right format. missing 0"
         Just idx ->

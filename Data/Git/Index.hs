@@ -168,13 +168,13 @@ indexReadHeader fr = fileReaderSeek fr 0 >> fileReaderParse fr parseIndexHeader
 
 -- | get index header from an index reference
 indexGetHeader :: FilePath -> Ref -> IO IndexHeader
-indexGetHeader repoPath indexRef = withIndex repoPath indexRef $ indexReadHeader
+indexGetHeader repoPath indexRef = withIndex repoPath indexRef indexReadHeader
 
 -- | read all index
 indexRead :: FilePath -> Ref -> IO (IndexHeader, (Vector Ref, Vector Word32, Vector Word32,
                                     [B.ByteString], Ref, Ref))
 
-indexRead repoPath indexRef = do
+indexRead repoPath indexRef =
 	withIndex repoPath indexRef $ \fr -> do
 		idx <- fileReaderParse fr parseIndexHeader
 		liftM2 (,) (return idx) (fileReaderParse fr (parseIndex $ indexHeaderGetSize idx))
@@ -182,7 +182,7 @@ indexRead repoPath indexRef = do
 		sha1s     <- V.replicateM (fromIntegral sz) (fromBinary <$> A.take 20)
 		crcs      <- V.replicateM (fromIntegral sz) (be32 <$> A.take 4)
 		packoffs  <- V.replicateM (fromIntegral sz) (be32 <$> A.take 4)
-		let nbLarge = length $ filter (== True) $ map (\packoff -> packoff `testBit` 31) $ V.toList packoffs
+		let nbLarge = length $ filter (== True) $ map (`testBit` 31) $ V.toList packoffs
 		largeoffs <- replicateM nbLarge (A.take 4)
 		packfileChecksum <- fromBinary <$> A.take 20
 		idxfileChecksum  <- fromBinary <$> A.take 20

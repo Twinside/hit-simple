@@ -1,5 +1,4 @@
 {-# LANGUAGE ScopedTypeVariables #-}
-{-# LANGUAGE ViewPatterns #-}
 module Data.Git.Repository
     ( Git
     , gitRepoPath
@@ -44,6 +43,7 @@ import qualified Data.ByteString as B
 import Data.Word
 import Data.IORef
 import Data.List ((\\), isPrefixOf)
+import Data.Maybe( fromMaybe )
 
 import Data.Git.Delta
 import Data.Git.FileReader
@@ -89,7 +89,7 @@ findRepository = inner ""
 
 -- | execute a function f with a git context.
 withRepo :: FilePath -> (Git -> IO c) -> IO c
-withRepo path f = bracket (openRepo path) closeRepo f
+withRepo path = bracket (openRepo path) closeRepo
 
 iterateIndexes :: Git -> (a -> (Ref, IndexReader) -> IO (a,Bool)) -> a -> IO a
 iterateIndexes git f initAcc = do
@@ -120,7 +120,7 @@ iterateIndexes git f initAcc = do
                 else readRemainingIndexes nacc idxs
 
 findReference :: Git -> Ref -> IO ObjectLocation
-findReference git ref = maybe NotFound id <$> (findLoose `mplusIO` findInIndexes)
+findReference git ref = fromMaybe NotFound <$> (findLoose `mplusIO` findInIndexes)
     where
         findLoose :: IO (Maybe ObjectLocation)
         findLoose = do
@@ -130,7 +130,7 @@ findReference git ref = maybe NotFound id <$> (findLoose `mplusIO` findInIndexes
         findInIndexes :: IO (Maybe ObjectLocation)
         findInIndexes = iterateIndexes git isinIndex Nothing --f -> (a -> IndexReader -> IO (a,Bool)) -> a -> IO a
 
-        isinIndex acc (idxref, (IndexReader idxhdr indexreader)) = do
+        isinIndex acc (idxref, IndexReader idxhdr indexreader) = do
             mloc <- indexGetReferenceLocation idxhdr indexreader ref
             case mloc of
                 Nothing  -> return (acc, False)
@@ -156,7 +156,7 @@ findReferencesWithPrefix git pre
         prefixLength =  length pre
         invalidLength = prefixLength < 2 || prefixLength > 39
 
-        idxPrefixMatch acc (_, (IndexReader idxhdr indexreader)) = do
+        idxPrefixMatch acc (_, IndexReader idxhdr indexreader) = do
             refs <- indexGetReferencesWithPrefix idxhdr indexreader pre
             return (refs:acc,False)
 
@@ -182,7 +182,7 @@ readFromPack git pref o = do
             where hdr = (poiType po, poiActualSize po, poiExtra po)
 
         resolve :: FileReader -> Word64 -> PackedObjectRaw -> IO (Maybe ObjectInfo)
-        resolve reader offset (po, objData) = do
+        resolve reader offset (po, objData) =
             case (poiType po, poiExtra po) of
                 (TypeDeltaOff, Just ptr@(PtrOfs doff)) -> do
                     let delta = deltaRead objData
@@ -279,10 +279,10 @@ resolveRevision git (Revision prefix modifiers) =
                   then Just <$> readRemoteBranch git branch branchName
                   else return Nothing
 
-          resolveNamedPrefix (x:xs) = do
-              exists <- (fst x) git prefix
+          resolveNamedPrefix ((first, second) :xs) = do
+              exists <- first git prefix
               if exists
-                  then Just <$> (snd x) git prefix
+                  then Just <$> second git prefix
                   else resolveNamedPrefix xs
     
 -- | basic checks to see if a specific path looks like a git repo.
@@ -291,11 +291,11 @@ isRepo path = do
     dir     <- doesDirectoryExist path
     subDirs <- mapM (doesDirectoryExist . (path </>))
                     ["objects","refs"</>"heads","refs"</>"tags"]
-    return $ and ([dir] ++ subDirs)
+    return $ and (dir : subDirs)
 
 getDirectoryContentNoDots :: FilePath -> IO [String]
 getDirectoryContentNoDots path = filter noDot <$> getDirectoryContents path
-	where noDot = (not . isPrefixOf ".")
+	where noDot = not . isPrefixOf "."
 
 -- | Obtain the current head of the repository.
 getHead :: Git -> IO (Maybe Ref)

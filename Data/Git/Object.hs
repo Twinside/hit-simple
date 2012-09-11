@@ -157,7 +157,7 @@ octal = B.foldl' step 0 `fmap` takeWhile1 isOct where
 	step a w = a * 8 + fromIntegral (w - 0x30)
 
 skipChar :: Char -> Parser ()
-skipChar c = PC.char c >> return ()
+skipChar = void . PC.char
 
 referenceHex ::  A.Parser Ref
 referenceHex = fromHex <$> P.take 40
@@ -171,7 +171,7 @@ treeParse = Tree <$> parseEnts
     where parseEnts = atEnd >>= \end -> if end then return []
                                                else liftM2 (:) parseEnt parseEnts
           parseEnt = (,,) <$> octal 
-                          <*> (PC.char ' ' *> takeTill ((==) 0))
+                          <*> (PC.char ' ' *> takeTill (== 0))
                           <*> (word8 0 *> referenceBin)
 
 -- | parse a blob content
@@ -195,18 +195,18 @@ commitParse = Commit <$> commit
 tagParse :: A.Parser GitObject
 tagParse = Tag <$> tagInfo
   where objType =
-            objectTypeUnmarshall . BC.unpack <$> (string "type " *> takeTill ((==) 0x0a))
+            objectTypeUnmarshall . BC.unpack <$> (string "type " *> takeTill (== 0x0a))
         tagInfo = TagInfo
                <$> (string "object " *> referenceHex) <* skipChar '\n'
                <*> (objType <* skipChar '\n')
-               <*> (string "tag " *> takeTill ((==) 0x0a)) <* skipChar '\n'
+               <*> (string "tag " *> takeTill (== 0x0a)) <* skipChar '\n'
                <*> (string "tagger " *> parseName) <* skipChar '\n'
                <*> takeByteString
 
 parseName :: A.Parser CommitAuthor
 parseName = CommitAuthor
-         <$> (B.init <$> PC.takeWhile ((/=) '<')) <* skipChar '<'
-         <*> PC.takeWhile ((/=) '>') <* string "> "
+         <$> (B.init <$> PC.takeWhile (/= '<')) <* skipChar '<'
+         <*> PC.takeWhile (/= '>') <* string "> "
          <*> PC.decimal <* string " "
          <*> PC.signed PC.decimal <* skipChar '\n'
 

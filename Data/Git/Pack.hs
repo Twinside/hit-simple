@@ -97,7 +97,7 @@ packReadAtOffset :: FileReader -> Word64 -> IO (Maybe GitObject)
 packReadAtOffset fr offset = packReadMapAtOffset fr offset id
 
 -- | read a raw representation at a specific position
-packReadRawAtOffset :: FileReader -> Word64 -> IO (PackedObjectRaw)
+packReadRawAtOffset :: FileReader -> Word64 -> IO PackedObjectRaw
 packReadRawAtOffset fr offset = fileReaderSeek fr offset >> getNextObjectRaw fr
 
 -- | enumerate all objects in this pack and callback to f for reach raw objects

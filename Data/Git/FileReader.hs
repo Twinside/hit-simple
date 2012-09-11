@@ -65,18 +65,18 @@ fileReaderClose = hClose . fbHandle
 
 withFileReader :: FilePath -> (FileReader -> IO a) -> IO a
 withFileReader path f =
-	bracket (openFile path ReadMode) (hClose) $ \handle ->
+	withFile path ReadMode $ \handle ->
 		bracket (fileReaderNew False handle) (\_ -> return ()) f
 
 withFileReaderDecompress :: FilePath -> (FileReader -> IO a) -> IO a
 withFileReaderDecompress path f =
-	bracket (openFile path ReadMode) (hClose) $ \handle ->
+	withFile path ReadMode $ \handle ->
 		bracket (fileReaderNew True handle) (\_ -> return ()) f
 
 fileReaderGetNext :: FileReader -> IO ByteString
 fileReaderGetNext fb = do
 	bs <- if fbUseInflate fb then inflateTillPop else B.hGet (fbHandle fb) 8192
-	modifyIORef (fbPos fb) (\pos -> pos + (fromIntegral $ B.length bs))
+	modifyIORef (fbPos fb) (\pos -> pos + fromIntegral (B.length bs))
 	return bs
 	where inflateTillPop = do
 		b <- B.hGet (fbHandle fb) 4096
@@ -117,7 +117,7 @@ fileReaderGetBS size fb = B.concat <$> fileReaderGet size fb
 
 -- | seek in a handle, and reset the remaining buffer to empty.
 fileReaderSeek :: FileReader -> Word64 -> IO ()
-fileReaderSeek (FileReader { fbHandle = handle, fbRemaining = ref, fbPos = pos }) absPos = do
+fileReaderSeek (FileReader { fbHandle = handle, fbRemaining = ref, fbPos = pos }) absPos =
 	writeIORef ref B.empty >> writeIORef pos absPos >> hSeek handle AbsoluteSeek (fromIntegral absPos)
 
 -- | parse from a filebuffer
@@ -133,9 +133,9 @@ fileReaderParse fr@(FileReader { fbRemaining = ref }) parseF = do
 -- | get a Variable Length Field. get byte as long as MSB is set, and one byte after
 fileReaderGetVLF :: FileReader -> IO [Word8]
 fileReaderGetVLF fr = fileReaderParse fr $ do
-	bs <- A.takeWhile (\w -> w `testBit` 7)
+	bs <- A.takeWhile (`testBit` 7)
 	l  <- A.anyWord8
-	return $ (map (\w -> w `clearBit` 7) $ B.unpack bs) ++ [l]
+	return $ map (`clearBit` 7) (B.unpack bs) ++ [l]
 
 fileReaderInflateToSize :: FileReader -> Word64 -> IO L.ByteString
 fileReaderInflateToSize fb@(FileReader { fbRemaining = ref }) outputSize = do
@@ -149,7 +149,7 @@ fileReaderInflateToSize fb@(FileReader { fbRemaining = ref }) outputSize = do
 	where loop inflate left = do
 		rbs <- readIORef ref
 		let maxToInflate = min left (16 * 1024)
-		let lastBlock = if left == maxToInflate then True else False
+		let lastBlock = left == maxToInflate
 		(dbs,remaining) <- inflateToSize inflate (fromIntegral maxToInflate) lastBlock rbs (fileReaderGetNext fb)
 		writeIORef ref remaining
 		let nleft = left - fromIntegral (B.length dbs)
@@ -186,8 +186,7 @@ inflateToSize inflate sz isLastBlock ibs nextBs = withForeignPtr inflate $ \zstr
 			ao <- c_get_avail_out zstr
 			if (isLastBlock && streamEnd) || (not isLastBlock && ao == 0)
 				then return $ bsTakeLast ai nbs
-				else do
-					--when (ai /= 0) $ error ("input not consumed completly: ai" ++ show ai)
+				else --when (ai /= 0) $ error ("input not consumed completly: ai" ++ show ai)
 					(if ai == 0
 						then nextBs
 						else return (bsTakeLast ai nbs)) >>= loop zstr
@@ -195,8 +194,8 @@ inflateToSize inflate sz isLastBlock ibs nextBs = withForeignPtr inflate $ \zstr
 		inflateOneInput zstr bs = unsafeUseAsCStringLen bs $ \(istr, ilen) -> do
 			c_set_avail_in zstr istr $ fromIntegral ilen
 			r <- c_call_inflate_noflush zstr
-			when (r < 0 && r /= (-5)) $ do
-				throwIO $ ZlibException $ fromIntegral r
+			when (r < 0 && r /= (-5))
+				 (throwIO . ZlibException $ fromIntegral r)
 			ai <- c_get_avail_in zstr
 			return (ai, r == 1)
 		bsTakeLast len bs = B.drop (B.length bs - fromIntegral len) bs

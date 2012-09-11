@@ -43,12 +43,12 @@ deltaParse = Delta <$> getDeltaHdrSize <*> getDeltaHdrSize
                    <*> many (anyWord8 >>= parseWithCmd)
 	where
 		getDeltaHdrSize = do
-			z <- A.takeWhile (\w -> w `testBit` 7)
+			z <- A.takeWhile (`testBit` 7)
 			l <- anyWord8
-			return $ unbytes 0 $ (map (\w -> w `clearBit` 7) (B.unpack z) ++ [l])
+			return . unbytes 0 $ map (`clearBit` 7) (B.unpack z) ++ [l]
 		-- use a foldl ..
 		unbytes _  []     = 0
-		unbytes sh (x:xs) = (fromIntegral x) `shiftL` sh + unbytes (sh+7) xs
+		unbytes sh (x:xs) = fromIntegral x `shiftL` sh + unbytes (sh+7) xs
 		-- parse one command, either an extension, a copy from src, or a copy from delta.
 		parseWithCmd cmd
 			| cmd == 0        = error "delta extension not supported"
@@ -64,7 +64,7 @@ deltaParse = Delta <$> getDeltaHdrSize <*> getDeltaHdrSize
 				let size   = s1 .|. s2 .|. s3
 				return $ DeltaSrc offset (if size == 0 then 0x10000 else size)
 			| otherwise       = DeltaCopy <$> A.take (fromIntegral cmd)
-		word8cond cond sh = do
+		word8cond cond sh =
 			if cond then (flip shiftL sh . fromIntegral) <$> anyWord8 else return 0
 
 -- | read one delta from a lazy bytestring.

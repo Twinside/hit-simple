@@ -62,7 +62,7 @@ revFromString s = case parse parser "" s of
                          <* char '}'
         
            parseAtType = try $
-               RevModAtType <$> (choice $ map string ["tree","commit","blob","tag"])
+               RevModAtType <$> choice (map string ["tree","commit","blob","tag"])
         
            parseAtN = try $ RevModAtN . read <$> many1 digit
         

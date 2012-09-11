@@ -43,10 +43,10 @@ instance Show Ref where
 	show = BC.unpack . toHex
 
 isHex :: ByteString -> Bool
-isHex = and . map isHexDigit . BC.unpack
+isHex = isHexString . BC.unpack
 
 isHexString :: String -> Bool
-isHexString = and . map isHexDigit
+isHexString = all isHexDigit
 
 -- | take a hexadecimal bytestring that represent a reference
 -- and turn into a ref
@@ -122,7 +122,7 @@ refPrefix (Ref b) = fromIntegral $ B.unsafeIndex b 0
 
 -- | compare prefix
 cmpPrefix :: String -> Ref -> Ordering
-cmpPrefix pre ref = pre `compare` (take (length pre) $ toHexString ref)
+cmpPrefix pre ref = pre `compare` take (length pre) (toHexString ref)
 
 -- | returns the splitted format "prefix/suffix" for addressing the loose object database
 toFilePathParts :: Ref -> (String, String)
