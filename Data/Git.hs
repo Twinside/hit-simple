@@ -39,6 +39,7 @@ module Data.Git(
 
                -- * Reference conversion
                , Ref
+               , RefSpec
                , toHexString
                , toBinary
                , fromHexString 
@@ -50,6 +51,7 @@ module Data.Git(
                , Revision
                , revFromString
                , resolveRevision
+               , readAllRemoteBranches
                ) where
 
 import Data.Git.Object

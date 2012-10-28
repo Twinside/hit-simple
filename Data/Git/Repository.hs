@@ -29,6 +29,7 @@ module Data.Git.Repository
     , readBranch 
     , readTag
     , readRemoteBranch 
+    , readAllRemoteBranches
     ) where
 
 import System.Directory
@@ -39,7 +40,7 @@ import Control.Exception
 import Control.Monad
 
 import qualified Data.ByteString as B
-{-import qualified Data.ByteString.Char8 as BC-}
+import Data.Attoparsec( parse, eitherResult )
 import Data.Word
 import Data.IORef
 import Data.List ((\\), isPrefixOf)
@@ -355,4 +356,12 @@ readBranch (Git { gitRepoPath = repo }) = readRef . headPath repo
 readRemoteBranch :: Git -> String -> String -> IO Ref
 readRemoteBranch (Git { gitRepoPath = repo }) branch =
     readRef . remoteEntPath repo branch
+
+readAllRemoteBranches :: Git -> IO [RefSpec]
+readAllRemoteBranches (Git { gitRepoPath = repo }) = do
+    let packRef = repo </> "packed-refs"
+    file <- B.readFile packRef
+    case eitherResult $ parse packedRefParse file of
+      Left _ -> return []
+      Right r -> return r
 

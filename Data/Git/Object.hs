@@ -14,6 +14,7 @@ module Data.Git.Object
 	, TreeEntry
 	, FileRights
 	, CommitAuthor( .. )
+	, RefSpec( .. )
 
     , objectTypeUnmarshall
 	, objectTypeIsDelta
@@ -22,10 +23,11 @@ module Data.Git.Object
 	, commitParse
 	, tagParse
 	, blobParse
+	, packedRefParse
 	) where
 
 import Data.Git.Ref
-
+import Data.List( groupBy )
 import Data.ByteString (ByteString)
 import qualified Data.ByteString as B
 import qualified Data.ByteString.Char8 as BC
@@ -35,7 +37,7 @@ import qualified Data.Attoparsec.Lazy as A
 import Data.Attoparsec.Lazy
 import qualified Data.Attoparsec.Lazy as P
 import qualified Data.Attoparsec.Char8 as PC
-import Control.Applicative ((<$>), many, (<*>), (<*), (*>) )
+import Control.Applicative ((<$>), many, (<*>), (<*), (*>), (<|>), pure )
 import Control.Monad
 
 import Data.Word
@@ -164,6 +166,51 @@ referenceHex = fromHex <$> P.take 40
 
 referenceBin :: Parser Ref
 referenceBin = fromBinary <$> P.take 20
+
+data RefSpec = RefTag Ref String
+             | RefRemote String [(Ref, String)]
+             deriving (Eq, Show)
+
+packedRefParse :: A.Parser [RefSpec]
+packedRefParse = concat . map flattenInfo . groupBy branchName . concat <$> PC.many1 specParse
+  where branchName (RefRemote a _) (RefRemote b _) = a == b
+        branchName _ _ = False
+
+        flattenInfo :: [RefSpec] -> [RefSpec]
+        flattenInfo [] = []
+        flattenInfo [x] = [x]
+        flattenInfo lst@(RefRemote remote _:_) =
+            [RefRemote remote [(ref, branch) |
+                            RefRemote _ ((ref,branch):_) <- lst]]
+        flattenInfo a = a
+
+        commentParse = PC.char '#' *> PC.takeTill ((== '\n'))
+                                   *> PC.char '\n'
+                                   *> pure []
+        separator = PC.endOfInput
+                 <|> (PC.char '\n' *> pure ())
+
+        notEndOfLine c = c /= '\n' && c /= '\0'
+
+        refParse = do
+            ref <- referenceHex <* string " refs/"
+            let tagParser = RefTag ref
+                         <$> (PC.string "tags/"
+                                *> (BC.unpack <$> PC.takeWhile (/= '\n'))
+                                <* separator)
+                         <?> "TAG"
+
+                remoteParser = do
+                    PC.string "remotes/"
+                    remoteName <- PC.takeWhile ((/=) '/') <* PC.char '/'
+                    branch <- PC.takeWhile (/= '\n')
+                    separator
+                    pure $ RefRemote (BC.unpack remoteName)
+                                     [(ref, BC.unpack branch)]
+
+            (:[]) <$> (tagParser <|> remoteParser)
+
+        specParse = commentParse <|> refParse
 
 -- | parse a tree content
 treeParse :: A.Parser GitObject
