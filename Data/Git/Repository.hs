@@ -40,7 +40,7 @@ import Control.Exception
 import Control.Monad
 
 import qualified Data.ByteString as B
-import Data.Attoparsec( parse, eitherResult )
+import Data.Attoparsec( parseOnly )
 import Data.Word
 import Data.IORef
 import Data.List ((\\), isPrefixOf)
@@ -361,7 +361,7 @@ readAllRemoteBranches :: Git -> IO [RefSpec]
 readAllRemoteBranches (Git { gitRepoPath = repo }) = do
     let packRef = repo </> "packed-refs"
     file <- B.readFile packRef
-    case eitherResult $ parse packedRefParse file of
-      Left _ -> return []
+    case parseOnly packedRefParse file of
+      Left err -> trace (show err) $ return []
       Right r -> return r
 

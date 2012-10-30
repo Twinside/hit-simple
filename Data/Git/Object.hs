@@ -185,7 +185,7 @@ packedRefParse = concat . map flattenInfo . groupBy branchName . concat <$> PC.m
         flattenInfo a = a
 
         commentParse = PC.char '#' *> PC.takeTill ((== '\n'))
-                                   *> PC.char '\n'
+                                   *> separator
                                    *> pure []
         separator = PC.endOfInput
                  <|> (PC.char '\n' *> pure ())

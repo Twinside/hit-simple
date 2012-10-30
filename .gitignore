@@ -3,3 +3,4 @@ dist
 *.hi
 Hit
 Tests
+cabal-dev
