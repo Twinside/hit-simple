@@ -190,8 +190,6 @@ packedRefParse = concat . map flattenInfo . groupBy branchName . concat <$> PC.m
         separator = PC.endOfInput
                  <|> (PC.char '\n' *> pure ())
 
-        notEndOfLine c = c /= '\n' && c /= '\0'
-
         refParse = do
             ref <- referenceHex <* string " refs/"
             let tagParser = RefTag ref
@@ -201,7 +199,7 @@ packedRefParse = concat . map flattenInfo . groupBy branchName . concat <$> PC.m
                          <?> "TAG"
 
                 remoteParser = do
-                    PC.string "remotes/"
+                    _ <- PC.string "remotes/"
                     remoteName <- PC.takeWhile ((/=) '/') <* PC.char '/'
                     branch <- PC.takeWhile (/= '\n')
                     separator

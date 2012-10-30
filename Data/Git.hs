@@ -39,7 +39,7 @@ module Data.Git(
 
                -- * Reference conversion
                , Ref
-               , RefSpec
+               , RefSpec( .. )
                , toHexString
                , toBinary
                , fromHexString 
