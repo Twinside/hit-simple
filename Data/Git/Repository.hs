@@ -362,6 +362,6 @@ readAllRemoteBranches (Git { gitRepoPath = repo }) = do
     let packRef = repo </> "packed-refs"
     file <- B.readFile packRef
     case parseOnly packedRefParse file of
-      Left err -> return []
+      Left _err -> return []
       Right r -> return r
 

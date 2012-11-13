@@ -167,12 +167,15 @@ referenceHex = fromHex <$> P.take 40
 referenceBin :: Parser Ref
 referenceBin = fromBinary <$> P.take 20
 
-data RefSpec = RefTag Ref String
+data RefSpec = RefLocal Ref String
+             | RefOther Ref String
+             | RefTag Ref String
              | RefRemote String [(Ref, String)]
              deriving (Eq, Show)
 
 packedRefParse :: A.Parser [RefSpec]
-packedRefParse = concat . map flattenInfo . groupBy branchName . concat <$> PC.many1 specParse
+packedRefParse = concat . map flattenInfo . groupBy branchName . concat 
+              <$> PC.many1 specParse
   where branchName (RefRemote a _) (RefRemote b _) = a == b
         branchName _ _ = False
 
@@ -198,15 +201,27 @@ packedRefParse = concat . map flattenInfo . groupBy branchName . concat <$> PC.m
                                 <* separator)
                          <?> "TAG"
 
-                remoteParser = do
-                    _ <- PC.string "remotes/"
-                    remoteName <- PC.takeWhile ((/=) '/') <* PC.char '/'
+                gitRemote = do
+                    remoteName <- PC.takeWhile (\c -> c /= '/' && c/= '\n') <* PC.char '/'
                     branch <- PC.takeWhile (/= '\n')
                     separator
                     pure $ RefRemote (BC.unpack remoteName)
                                      [(ref, BC.unpack branch)]
+                gitSvnRemote = do
+                    RefOther ref . BC.unpack
+                        <$> PC.takeWhile (/= '\n') <* separator
 
-            (:[]) <$> (tagParser <|> remoteParser)
+                remoteParser = do
+                    _ <- PC.string "remotes/"
+                    gitRemote <|> gitSvnRemote
+
+                localParser = do
+                    RefLocal ref . BC.unpack
+                        <$> (PC.string "heads/"
+                                *> PC.takeWhile (/= '\n')
+                               <* separator)
+
+            (:[]) <$> (tagParser <|> remoteParser <|> localParser)
 
         specParse = commentParse <|> refParse
 
