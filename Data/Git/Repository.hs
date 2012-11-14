@@ -35,9 +35,8 @@ module Data.Git.Repository
 import System.Directory
 import System.FilePath
 
-import Control.Applicative ((<$>))
+import Control.Applicative ((<$>), (<*>))
 import Control.Exception
-import Control.Monad
 
 import qualified Data.ByteString as B
 import Data.Attoparsec( parseOnly )
@@ -65,11 +64,13 @@ data Git = Git
                                     -- placed
     , indexReaders :: IORef [(Ref, IndexReader)]
     , packReaders  :: IORef [(Ref, FileReader)]
+    , packedRefs   :: IORef (Maybe [RefSpec])
     }
 
 -- | open a new git repository context
 openRepo :: FilePath -> IO Git
-openRepo path = liftM2 (Git path) (newIORef []) (newIORef [])
+openRepo path =
+    Git path <$> newIORef []<*> newIORef [] <*> newIORef Nothing
 
 -- | close a git repository context, closing all remaining fileReaders.
 closeRepo :: Git -> IO ()
@@ -149,8 +150,7 @@ findReferencesWithPrefix git pre
     | invalidLength || not (isHexString pre) = return []
     | otherwise             = do
         looseRefs  <- looseEnumerateWithPrefixFilter (gitRepoPath git) (take 2 pre) matchRef
-        packedRefs <- concat <$> iterateIndexes git idxPrefixMatch []
-        return (looseRefs ++ packedRefs)
+        (looseRefs ++) . concat <$> iterateIndexes git idxPrefixMatch []
     where
         -- not very efficient way to do that... will do for now.
         matchRef ref = pre `isPrefixOf` toHexString ref
@@ -300,12 +300,36 @@ getDirectoryContentNoDots path = filter noDot <$> getDirectoryContents path
 
 -- | Obtain the current head of the repository.
 getHead :: Git -> IO (Maybe Ref)
-getHead (Git { gitRepoPath = path }) = do
-    content <- readFile $ path </> "HEAD"
-    case content of
-        ('r':'e':'f':':':' ':fname) ->
-            Just <$> readRef (path </> head (lines fname))
-        _ -> return Nothing
+getHead git@(Git { gitRepoPath = path, packedRefs = br }) =
+ readFile (path </> "HEAD") >>= reader
+  where reader ('r':'e':'f':':':' ':fname) = do
+            let endname = head (lines fname)
+                refPath = path </> endname
+            isUnpacked <- doesFileExist refPath
+            if isUnpacked
+                then Just <$> readRef refPath
+                else findPackedRef endname
+
+        reader _ = return Nothing
+
+        findPackedRef n = do
+            refs <- infoList
+            case [r | (r, s) <- refs, s == n] of
+              [] -> return Nothing
+              (v:_) -> return $ Just v
+
+        infoList = do
+            refspeclist <- readIORef br
+            case refspeclist of
+               Nothing ->
+                   readAllRemoteBranches git >>= writeIORef br . Just >> infoList
+               Just lst -> return $ concatMap infoFromSpec lst
+
+        infoFromSpec (RefLocal r s) = [(r, "refs/heads/" ++ s)]
+        infoFromSpec (RefOther r s) = [(r, "refs/remotes" ++ s)]
+        infoFromSpec (RefTag r s) = [(r, "refs/tags" ++ s)]
+        infoFromSpec (RefRemote s lst) =
+            [(r, "refs/remotes/" ++ s ++ "/" ++ branch) | (r, branch) <- lst]
 
 
 -- | This function will fetch the list of known local
@@ -358,10 +382,14 @@ readRemoteBranch (Git { gitRepoPath = repo }) branch =
     readRef . remoteEntPath repo branch
 
 readAllRemoteBranches :: Git -> IO [RefSpec]
-readAllRemoteBranches (Git { gitRepoPath = repo }) = do
-    let packRef = repo </> "packed-refs"
-    file <- B.readFile packRef
-    case parseOnly packedRefParse file of
-      Left _err -> return []
-      Right r -> return r
+readAllRemoteBranches (Git { gitRepoPath = repo, packedRefs = br }) = do
+    previousRead <- readIORef br
+    case previousRead of
+      Just refs -> return refs
+      Nothing -> do
+        let packRef = repo </> "packed-refs"
+        file <- B.readFile packRef
+        case parseOnly packedRefParse file of
+            Left _ -> return []
+            Right r -> writeIORef br (Just r) >> return r
 
