@@ -19,6 +19,7 @@ module Data.Git.Repository
     , getTagNames
     , getRemoteNames
     , getRemoteBranchNames
+    , getGitSvnBranchNames
 
     -- ** Querying for existence
 	, doesHeadExist
@@ -29,6 +30,7 @@ module Data.Git.Repository
     , readBranch 
     , readTag
     , readRemoteBranch 
+    , readGitSvnBranch 
     , readAllRemoteBranches
     ) where
 
@@ -38,6 +40,7 @@ import System.FilePath
 import Control.Applicative ((<$>), (<*>))
 import Control.Exception
 
+import Control.Monad( filterM )
 import qualified Data.ByteString as B
 import Data.Attoparsec( parseOnly )
 import Data.Word
@@ -348,7 +351,13 @@ getTagNames (Git { gitRepoPath = path }) =
 -- repository) known in the repository.
 getRemoteNames :: Git -> IO [String]
 getRemoteNames (Git { gitRepoPath = path }) =
-    getDirectoryContentNoDots $ remotesPath path
+    getDirectoryContentNoDots (remotesPath path)
+        >>= filterM doesDirectoryExist
+
+getGitSvnBranchNames :: Git -> IO [String]
+getGitSvnBranchNames (Git { gitRepoPath = path }) =
+    getDirectoryContentNoDots (remotesPath path)
+        >>= filterM doesFileExist
 
 -- | Given a repository and remote name, will fetch all
 -- the known branches
@@ -376,6 +385,10 @@ readTag (Git { gitRepoPath = repo }) = readRef . tagPath repo
 
 readBranch :: Git -> String -> IO Ref
 readBranch (Git { gitRepoPath = repo }) = readRef . headPath repo
+
+readGitSvnBranch :: Git -> String -> IO Ref
+readGitSvnBranch (Git { gitRepoPath = repo }) branch =
+    readRef $ remotePath repo branch
 
 readRemoteBranch :: Git -> String -> String -> IO Ref
 readRemoteBranch (Git { gitRepoPath = repo }) branch =

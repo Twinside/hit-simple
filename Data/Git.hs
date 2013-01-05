@@ -18,6 +18,7 @@ module Data.Git(
                , getTagNames
                , getRemoteNames
                , getRemoteBranchNames
+               , getGitSvnBranchNames
 
                -- ** Querying for existence
                , doesHeadExist
@@ -28,6 +29,7 @@ module Data.Git(
                , readBranch 
                , readTag
                , readRemoteBranch
+               , readGitSvnBranch 
 
                -- * Git objects
                , GitObject(..)
