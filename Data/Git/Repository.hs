@@ -351,13 +351,15 @@ getTagNames (Git { gitRepoPath = path }) =
 -- repository) known in the repository.
 getRemoteNames :: Git -> IO [String]
 getRemoteNames (Git { gitRepoPath = path }) =
-    getDirectoryContentNoDots (remotesPath path)
-        >>= filterM doesDirectoryExist
+  getDirectoryContentNoDots fullDir
+        >>= filterM (\d -> doesDirectoryExist $ fullDir ++ "/" ++ d)
+    where fullDir = remotesPath path
 
 getGitSvnBranchNames :: Git -> IO [String]
 getGitSvnBranchNames (Git { gitRepoPath = path }) =
-    getDirectoryContentNoDots (remotesPath path)
-        >>= filterM doesFileExist
+  getDirectoryContentNoDots fullDir
+        >>= filterM (\f -> doesFileExist $ fullDir ++ "/" ++ f)
+    where fullDir = remotesPath path
 
 -- | Given a repository and remote name, will fetch all
 -- the known branches
