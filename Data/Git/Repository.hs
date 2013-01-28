@@ -313,7 +313,10 @@ getHead git@(Git { gitRepoPath = path, packedRefs = br }) =
                 then Just <$> readRef refPath
                 else findPackedRef endname
 
-        reader _ = return Nothing
+        reader str | isHexString cleanString = return . Just $ fromHexString cleanString
+                   | otherwise = return Nothing
+            where cleanString = takeWhile notEol str
+                  notEol c = c /= '\r' && c /= '\n'
 
         findPackedRef n = do
             refs <- infoList
