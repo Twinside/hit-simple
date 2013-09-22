@@ -45,6 +45,7 @@ module Data.Git(
                , toHexString
                , toBinary
                , fromHexString 
+               , fromHexText
                , fromBinary
                , toHex
                , fromHex
