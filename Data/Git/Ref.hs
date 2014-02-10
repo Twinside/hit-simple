@@ -11,6 +11,7 @@ module Data.Git.Ref
 	, isHexString
 	, fromHex
 	, fromHexString
+	, fromHexText
 	, fromBinary
 	, toBinary
 	, toHex
@@ -32,6 +33,7 @@ import qualified Data.ByteString.Unsafe as B (unsafeIndex)
 import qualified Data.ByteString.Char8 as BC
 import Data.Bits
 import Data.Char (isHexDigit)
+import qualified Data.Text as T
 
 import Foreign.Storable
 
@@ -87,6 +89,9 @@ fromHex s
 -- and turn into a ref
 fromHexString :: String -> Ref
 fromHexString = fromHex . BC.pack
+
+fromHexText :: T.Text -> Ref
+fromHexText = fromHex . BC.pack . T.unpack
 
 -- | transform a ref into an hexadecimal bytestring
 toHex :: Ref -> ByteString
