@@ -193,8 +193,10 @@ packedRefParse = concat . map flattenInfo . groupBy branchName . concat
         separator = PC.endOfInput
                  <|> (PC.char '\n' *> pure ())
 
+        space = PC.char '\t' <|> PC.char ' '
+
         refParse = do
-            ref <- referenceHex <* string " refs/"
+            ref <- referenceHex <* space <* string "refs/"
             let tagParser = RefTag ref
                          <$> (PC.string "tags/"
                                 *> (BC.unpack <$> PC.takeWhile (/= '\n'))
@@ -220,8 +222,15 @@ packedRefParse = concat . map flattenInfo . groupBy branchName . concat
                         <$> (PC.string "heads/"
                                 *> PC.takeWhile (/= '\n')
                                <* separator)
+                stashParser = do
+                    RefLocal ref . BC.unpack
+                        <$> (PC.string "stash" <* PC.takeWhile (/= '\n') <* separator)
 
-            (:[]) <$> (tagParser <|> remoteParser <|> localParser)
+                bisectParser = do
+                    RefLocal ref . BC.unpack
+                        <$> (B.append <$> PC.string "bisect/" <*> PC.takeWhile (/= '\n') <* separator)
+
+            (:[]) <$> (tagParser <|> remoteParser <|> localParser <|> bisectParser <|> stashParser)
 
         specParse = commentParse <|> refParse
 

@@ -405,9 +405,20 @@ readAllRemoteBranches (Git { gitRepoPath = repo, packedRefs = br }) = do
     case previousRead of
       Just refs -> return refs
       Nothing -> do
-        let packRef = repo </> "packed-refs"
-        file <- B.readFile packRef
-        case parseOnly packedRefParse file of
-            Left _ -> return []
-            Right r -> writeIORef br (Just r) >> return r
+        rez <- (++) <$> parseFile "packed-refs"
+                    <*> parseFile ("info" </> "refs")
+        writeIORef br (Just rez)
+        return rez
+      where parseFile file = do
+                let filename = repo </> file
+                existing <- doesFileExist filename
+                if existing
+                  then do
+                    file <- B.readFile filename
+                    case parseOnly packedRefParse file of
+                      Left _ -> return []
+                      Right r -> return r
+                  else
+                    return []
+                
 
