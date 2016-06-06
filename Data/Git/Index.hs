@@ -6,6 +6,7 @@
 -- Portability : unix
 --
 {-# LANGUAGE OverloadedStrings, BangPatterns #-}
+{-# LANGUAGE FlexibleContexts #-}
 module Data.Git.Index
 	( IndexHeader(..)
 	, Index(..)
