@@ -1,5 +1,5 @@
 Name:                hit
-Version:             0.6.3
+Version:             0.6.4
 Synopsis:            Git operations in haskell
 Description:
     .
@@ -55,6 +55,7 @@ Library
                      Data.Git.FS
                      Data.Git.Monad
                      Data.Git.Types
+                     Data.Git.Index
                      Data.Git.Storage
                      Data.Git.Storage.PackIndex
                      Data.Git.Storage.Pack

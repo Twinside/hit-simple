@@ -1,94 +1,188 @@
+{-# OPTIONS_GHC -fwarn-missing-signatures #-}
+{-# LANGUAGE OverloadedStrings #-}
 module Data.Git.Index
-    (
+    ( IndexEntry( .. )
+    , parseIndex
+    , decodeIndex
+    , loadIndexFile
     ) where
 
+import Control.Monad( when
+                    , replicateM
+                    )
 import Control.Applicative
+import Data.Bits
+    ( unsafeShiftL
+    , unsafeShiftR
+    , testBit
+    , (.&.)
+    , (.|.)
+    )
+import Data.Word( Word8, Word16, Word32 )
 import Data.Git.Ref
-{-
-<INDEX_HEADER>
-    :   "DIRC" <INDEX_FILE_VERSION> <INDEX_ENTRY_COUNT>
-    ;
--}
-data IndexHeader = IndexHeader Word32 Word32
-    deriving (Show,Eq)
+import qualified Data.Vector as V
+import qualified Data.Attoparsec.ByteString as A
+import qualified Data.ByteString as B
+import qualified Data.Git.Parser as P
 
-parseBe32 = be32 <$> A.take 4
-parseBe16 = be16 <$> A.take 2
-parseRef  = fromBinary <$> A.take 20
+data IndexHeader = IndexHeader 
+  { _indexFileVersion :: {-# UNPACK #-} !Word32
+  , _indexEntryCount  :: {-# UNPACK #-} !Word32
+  }
+  deriving (Show, Eq)
 
+loadIndexFile :: FilePath -> IO (Either String (V.Vector IndexEntry))
+loadIndexFile path = decodeIndex <$> B.readFile path
+
+decodeIndex :: B.ByteString -> Either String (V.Vector IndexEntry)
+decodeIndex = A.parseOnly parseIndex
+
+parseIndex :: A.Parser (V.Vector IndexEntry)
+parseIndex = do
+  hdr <- parseIndexHeader
+  V.replicateM (fromIntegral $ _indexEntryCount hdr) parseIndexEntry
+
+parseBe32 :: A.Parser Word32
+parseBe32 = do
+  w1 <- parseBe16
+  w2 <- parseBe16
+  return $ fromIntegral w1 `unsafeShiftL` 16 .|. fromIntegral w2
+
+parseBe16 :: A.Parser Word16
+parseBe16 = do
+  w1 <- P.anyWord8
+  w2 <- P.anyWord8
+  return $ fromIntegral w1 `unsafeShiftL` 8 .|. fromIntegral w2
+
+parseRef :: A.Parser Ref
+parseRef = fromBinary <$> A.take 20
+
+parseIndexHeader :: A.Parser IndexHeader
 parseIndexHeader = do
-        magic   <- parseBe32
-        when (magic /= 'DIRC') $ error "wrong magic number for index"
-        ver     <- parseBe32
-        when (ver /= 2) $ error "unsupported packIndex version"
-        entries <- parseBe32
-        return $ IndexHeader ver entries
+  magic <- A.take 4
+  when (magic /= "DIRC") $
+    fail "wrong magic number for index"
+  ver <- parseBe32
+  when (ver `notElem` [2, 3]) $
+    fail "unsupported packIndex version"
+  entries <- parseBe32
+  return $ IndexHeader ver entries
 
-{-
-<INDEX_FILE_FORMAT_V2>
-    :   <INDEX_HEADER>
-        <EXTENDED_INDEX_CONTENTS>
-        <EXTENDED_CHECKSUM>
-    ;
+-- Index entries are sorted in ascending order on the name field,
+-- interpreted as a string of unsigned bytes (i.e. memcmp() order, no
+-- localization, no special casing of directory separator '/'). Entries
+-- with the same name are sorted by their stage field.
+data IndexEntry = IndexEntry
+  { -- | 32-bit ctime seconds, the last time a file's metadata changed
+    _ctime :: !Word32
+    -- | 32-bit ctime nanosecond fractions
+  , _ctimeNano :: !Word32
+    -- | 32-bit mtime seconds, the last time a file's data changed
+  , _mtime :: !Word32
+    -- | 32-bit mtime nanosecond fractions
+  , _mtimeNano :: !Word32
+   -- | 32-bit dev
+  , _dev :: !Word32
+   -- | 32-bit ino
+  , _ino :: !Word32
+   -- | 32-bit mode, split into (high to low bits)
+   -- 
+   -- 4-bit object type
+   --   valid values in binary are 1000 (regular file), 1010 (symbolic link)
+   --   and 1110 (gitlink)
+   -- 
+   -- 3-bit unused
+   -- 
+   -- 9-bit unix permission. Only 0755 and 0644 are valid for regular files.
+   -- Symbolic links and gitlinks have value 0 in this field.
+  , _mode :: !Word32
+    -- | 32-bit uid
+  , _uid  :: !Word32
+    -- | 32-bit gid
+  , _gid  :: !Word32
+    -- | 32-bit file size This is the on-disk size from stat(2), truncated to 32-bit.
+  , _fileSize :: !Word32
+    -- | 160-bit SHA-1 for the represented object
+  , _hash :: !Ref
+   
+    -- | A 16-bit 'flags' field
+  , _flags :: !IndexEntryFlags
+    -- (Version 3 or later) A 16-bit field, only applicable if the
+    -- "extended flag" above is 1, split into (high to low bits).
+    -- 
+    -- 1-bit reserved for future
+    -- 
+    -- 1-bit skip-worktree flag (used by sparse checkout)
+    -- 
+    -- 1-bit intent-to-add flag (used by "git add -N")
+    -- 
+    -- 13-bit unused, must be zero
+  , _extended :: !Word16
 
-<EXTENDED_CHECKSUM>
-    :   _sha-1_digest_( <EXTENDED_INDEX_CONTENTS> )
-    ;
+  , _fileName :: !B.ByteString
+  }
+  deriving (Eq, Show)
 
-<INDEX_CHECKSUM>
-    :   _sha-1_digest_( <INDEX_CONTENTS> )
-    ;
+data IndexEntryFlags = IndexEntryFlags 
+  { -- | 1-bit assume-valid flag
+    _iefAssumeValid :: !Bool
+    -- | 1-bit extended flag (must be zero in version 2)
+  , _iefExtended    :: !Bool
+    -- | 2-bit stage (during merge)
+  , _iefStage       :: {-# UNPACK #-} !Word8
+    -- | 12-bit name length if the length is less than 0xFFF;
+    -- otherwise 0xFFF is stored in this field.
+  , _iefNameLength  :: {-# UNPACK #-} !Word16
+  }
+  deriving (Eq, Show)
 
--}
+flagsOfWord :: Word16 -> IndexEntryFlags
+flagsOfWord w = IndexEntryFlags
+  { _iefAssumeValid = w `testBit` 15
+  , _iefExtended    = w `testBit` 14
+  , _iefStage       = fromIntegral $ (w `unsafeShiftR` 13) .&. 0x3
+  , _iefNameLength  = w .&. 0xFFF
+  }
 
-parseIndexContents entries = replicateM entries parseIndexEntry
-
-{-
-<EXTENDED_INDEX_CONTENTS>
-    :   <INDEX_CONTENTS>
-        <INDEX_CONTENTS_EXTENSIONS>
-    ;
-
--}
+parseIndexEntry :: A.Parser IndexEntry
 parseIndexEntry = do
-    -- INDEX_ENTRY_STAT_INFO
-    ctime <- parseTime
-    mtime <- parseTime
-    dev   <- parseBe32
-    inode <- parseBe32
-    mode  <- parseBe32
-    uid   <- parseBe32
-    gid   <- parseBe32
-    size  <- parseBe32
-    -- entry id, flags, name, zero padding
-   -- how to parse <ENTRY_ID>
-    flags <- parseBe16
-    -- 16 bit, network byte order, binary integer.
-    --   bits 15-14  Reserved
-    --   bits 13-12  Entry stage
-    --   bits 11-0   Name byte length
-    name  <- takeWhileNotNull
-    zeroPadding
+    ctime <- parseBe32      -- +4   4
+    ctimeNano <- parseBe32  -- +4   8
+    mtime <- parseBe32      -- +4   12
+    mtimeNano <- parseBe32  -- +4   16
+    dev   <- parseBe32      -- +4   20
+    inode <- parseBe32-- +4   24
+    mode  <- parseBe32-- +4   28
+    uid   <- parseBe32-- +4   32
+    gid   <- parseBe32-- +4   36
+    size  <- parseBe32-- +4   40
+    hash  <- parseRef-- +20   60
+    flags <- flagsOfWord <$> parseBe16 -- +2 62
+    extended <- if _iefExtended flags -- +2 64
+        then parseBe16
+        else return 0
+    name  <- A.take . fromIntegral $ _iefNameLength flags
+    let padding = 8 - ((62 + _iefNameLength flags) `mod` 8)
+    replicateM (fromIntegral padding) A.anyWord8
+    return IndexEntry
+        { _ctime = ctime
+        , _ctimeNano = ctimeNano
+        , _mtime = mtime
+        , _mtimeNano = mtimeNano
+        , _dev = dev
+        , _ino = inode
+        , _mode = mode
+        , _uid  = uid
+        , _gid  = gid
+        , _fileSize = size
+        , _hash = hash
+        , _flags = flags
+        , _extended = extended
+        , _fileName = name
+        }
+
 
 {-
-<ENTRY_ZERO_PADDING>
-    # The minimum length 0x00 byte sequence necessary to make the
-    # written of digested byte length of the <INDEX_ENTRY> a
-    # multiple of 8.
-    ;
--}
-
-parseTime = (,) <$> parseBe32 <*> parseBe32
-
-{-
-<ENTRY_ID>
-    # Object ID of the of the file system entity contents.
-    ;
-
-<ENTRY_NAME>
-    # File system entity name. Path is normalized and relative to
-    # the working directory.
-    ;
 
 <INDEX_CONTENTS_EXTENSIONS>
     :   ( <INDEX_EXTENSION> )*
@@ -106,5 +200,6 @@ parseIndexExtension = do
     -- # interpret the index file contents.
     name     <- A.take 4
     dataSize <- parseBe32
-    data_    <- A.take dataSize
+    data_    <- A.take $ fromIntegral dataSize
     return (name,data_)
+
