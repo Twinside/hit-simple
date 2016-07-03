@@ -1,16 +1,20 @@
 {-# OPTIONS_GHC -fwarn-missing-signatures #-}
+{-# LANGUAGE BangPatterns #-}
 {-# LANGUAGE OverloadedStrings #-}
 module Data.Git.Index
     ( IndexEntry( .. )
     , parseIndex
     , decodeIndex
     , loadIndexFile
+    , indexEntryOfFile
     ) where
 
+import Prelude hiding ( FilePath, readFile )
+import Filesystem
+import Filesystem.Path hiding (concat)
 import Control.Monad( when
                     , replicateM
                     )
-import Control.Applicative
 import Data.Bits
     ( unsafeShiftL
     , unsafeShiftR
@@ -20,9 +24,11 @@ import Data.Bits
     )
 import Data.Word( Word8, Word16, Word32 )
 import Data.Git.Ref
+import qualified Control.Exception as E
 import qualified Data.Vector as V
 import qualified Data.Attoparsec.ByteString as A
 import qualified Data.ByteString as B
+import qualified Data.ByteString.Char8 as BC
 import qualified Data.Git.Parser as P
 
 data IndexHeader = IndexHeader 
@@ -31,8 +37,29 @@ data IndexHeader = IndexHeader
   }
   deriving (Show, Eq)
 
+-- | Finds an index in a given vector, which must be sorted with respect to the
+-- given comparison function, at which the given element could be inserted while
+-- preserving the vector's sortedness.
+binarySearchBy :: (e -> a -> Ordering) -> V.Vector e -> a -> Maybe e
+{-# INLINE binarySearchBy #-}
+binarySearchBy cmp vec e = go 0 (length vec) where
+  go !l !u | u <= l    = Nothing
+  go !l !u =
+     let !k = (u + l) `unsafeShiftR` 1
+         !e' = V.unsafeIndex vec k in
+     case cmp e' e of
+       LT -> go (k+1) u
+       EQ -> Just e'
+       GT -> go l     k
+
+indexEntryOfFile :: B.ByteString -> V.Vector IndexEntry -> (Maybe IndexEntry)
+indexEntryOfFile path vec = binarySearchBy (compare . _fileName) vec path
+
 loadIndexFile :: FilePath -> IO (Either String (V.Vector IndexEntry))
-loadIndexFile path = decodeIndex <$> B.readFile path
+loadIndexFile path = (decodeIndex <$> readFile path) `E.catch` onError
+  where
+    onError :: E.SomeException -> IO (Either String a)
+    onError _ = return $ Left "Cannot find index file"
 
 decodeIndex :: B.ByteString -> Either String (V.Vector IndexEntry)
 decodeIndex = A.parseOnly parseIndex
@@ -156,14 +183,14 @@ parseIndexEntry = do
     uid   <- parseBe32-- +4   32
     gid   <- parseBe32-- +4   36
     size  <- parseBe32-- +4   40
-    hash  <- parseRef-- +20   60
+    fileHash  <- parseRef-- +20   60
     flags <- flagsOfWord <$> parseBe16 -- +2 62
     extended <- if _iefExtended flags -- +2 64
         then parseBe16
         else return 0
     name  <- A.take . fromIntegral $ _iefNameLength flags
     let padding = 8 - ((62 + _iefNameLength flags) `mod` 8)
-    replicateM (fromIntegral padding) A.anyWord8
+    _ <- replicateM (fromIntegral padding) A.anyWord8
     return IndexEntry
         { _ctime = ctime
         , _ctimeNano = ctimeNano
@@ -175,7 +202,7 @@ parseIndexEntry = do
         , _uid  = uid
         , _gid  = gid
         , _fileSize = size
-        , _hash = hash
+        , _hash = fileHash
         , _flags = flags
         , _extended = extended
         , _fileName = name
@@ -189,6 +216,7 @@ parseIndexEntry = do
     ;
 -}
 
+parseIndexExtension :: A.Parser (BC.ByteString, BC.ByteString)
 parseIndexExtension = do
     -- # 4 byte sequence identifying how the <INDEX_EXTENSION_DATA>
     -- # should be interpreted. If the first byte has a value greater

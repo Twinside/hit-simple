@@ -25,6 +25,7 @@ module Data.Git.Storage
     , initRepo
     -- * repository accessors
     , getDescription
+    , findFileInIndex
     , setDescription
     -- * iterators
     , iterateIndexes
@@ -56,6 +57,8 @@ import Data.List ((\\), isPrefixOf)
 import Data.Either (partitionEithers)
 import Data.IORef
 import Data.Word
+import qualified Data.Vector as V
+import qualified Data.ByteString as B
 
 import Data.Git.Named
 import Data.Git.Path (packedRefsPath)
@@ -68,6 +71,7 @@ import Data.Git.Storage.Loose
 import Data.Git.Storage.CacheFile
 import Data.Git.Ref
 import Data.Git.Config
+import Data.Git.Index
 
 import qualified Data.Map as M
 
@@ -84,6 +88,7 @@ data Git = Git
     { gitRepoPath  :: FilePath
     , indexReaders :: IORef [(Ref, PackIndexReader)]
     , packReaders  :: IORef [(Ref, FileReader)]
+    , fileIndex    :: IORef (Maybe (V.Vector IndexEntry))
     , packedNamed  :: CachedPackedRef
     , configs      :: IORef [Config]
     }
@@ -92,6 +97,7 @@ data Git = Git
 openRepo :: FilePath -> IO Git
 openRepo path = Git path <$> newIORef []
                          <*> newIORef []
+                         <*> newIORef Nothing
                          <*> packedRef
                          <*> (readConfigs >>= newIORef)
   where packedRef = newCacheVal (packedRefsPath path)
@@ -108,6 +114,21 @@ closeRepo (Git { indexReaders = ireaders, packReaders = preaders }) = do
     mapM_ (closeIndexReader . snd) =<< readIORef ireaders
     mapM_ (fileReaderClose . snd) =<< readIORef preaders
   where closeIndexReader (PackIndexReader _ fr) = fileReaderClose fr
+
+-- | Try to find file information in the Git index
+findFileInIndex :: Git -> B.ByteString -> IO (Maybe IndexEntry)
+findFileInIndex git path = do
+  index <- readIORef $ fileIndex git
+  realIndex <- case index of
+    Just i -> return i
+    Nothing -> do
+      idxErr <- loadIndexFile $ gitRepoPath git </> "index"
+      case idxErr of
+        Left _ -> return mempty
+        Right idx -> do
+            writeIORef (fileIndex git) (Just idx)
+            return idx
+  return $ indexEntryOfFile path realIndex
 
 -- | Find the git repository from the current directory.
 --

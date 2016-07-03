@@ -51,11 +51,11 @@ Library
                    , unix-compat
                    , utf8-string
                    , patience
+
   Exposed-modules:   Data.Git
                      Data.Git.FS
                      Data.Git.Monad
                      Data.Git.Types
-                     Data.Git.Index
                      Data.Git.Storage
                      Data.Git.Storage.PackIndex
                      Data.Git.Storage.Pack
@@ -68,6 +68,7 @@ Library
                      Data.Git.Repository
                      Data.Git.Diff
   Other-modules:     Data.Git.Internal
+                     Data.Git.Index
                      Data.Git.Imports
                      Data.Git.Config
                      Data.Git.Storage.FileReader
