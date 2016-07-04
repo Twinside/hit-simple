@@ -25,6 +25,7 @@ module Data.Git.Storage
     , initRepo
     -- * repository accessors
     , getDescription
+    , IndexEntry( .. )
     , findFileInIndex
     , setDescription
     -- * iterators
