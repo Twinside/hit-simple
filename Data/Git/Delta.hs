@@ -68,6 +68,7 @@ deltaParse = do
                 return $! DeltaSrc offset (if size == 0 then 0x10000 else size)
             | otherwise       = DeltaCopy <$> P.takeBytes (fromIntegral cmd)
 
+        {-# INLINE word8cond #-}
         word8cond False _ = return 0
         word8cond True sh =
             (flip unsafeShiftL sh . fromIntegral) <$> P.anyWord8
