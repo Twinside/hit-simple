@@ -64,8 +64,15 @@ newtype RefName = RefName { refNameRaw :: String }
 
 instance IsString RefName where
     fromString s
-        | isValidRefName s = RefName s
+        | isValidRefName slashed = RefName slashed
         | otherwise        = error ("invalid RefName " ++ show s)
+      where slashed = toUnixSlash s
+
+toUnixSlash :: String -> String
+toUnixSlash = fmap substBackslash where
+  -- windows Compat :(
+  substBackslash '\\' = '/'
+  substBackslash c = c
 
 isValidRefName :: String -> Bool
 isValidRefName s = not (or $ map isBadChar s)
@@ -75,7 +82,7 @@ isValidRefName s = not (or $ map isBadChar s)
 
 isValidRefFilepath :: FilePath -> Bool
 isValidRefFilepath f
-    | valid f   = isValidRefName $ encodeString f
+    | valid f   = isValidRefName . toUnixSlash $ encodeString f
     | otherwise = False
 
 -- FIXME BC.unpack/pack should be probably be utf8.toString,
@@ -151,21 +158,27 @@ readPackedRefs gitRepo constr = do
 
 -- | list all the loose refs available recursively from a directory starting point
 listRefs :: FilePath -> IO [RefName]
-listRefs root = listRefsAcc [] root
-  where listRefsAcc acc dir = do
-            files <- F.listDirectory dir
-            getRefsRecursively dir acc files
-        getRefsRecursively _   acc []     = return acc
-        getRefsRecursively dir acc (x:xs) = do
-            isDir <- F.isDirectory x
-            extra <- if isDir
-                        then listRefsAcc [] dir
-                        else let r = stripRoot x
-                              in if isValidRefFilepath r
-                                    then return [fromString $ encodeString r]
-                                    else return []
-            getRefsRecursively dir (extra ++ acc) xs
-        stripRoot p = maybe (error "stripRoot invalid") id $ stripPrefix root p
+listRefs root = listRefsAcc [] root where
+  listRefsAcc acc dir = do
+    files <- F.listDirectory dir
+    getRefsRecursively dir acc files
+
+  stripRoot p = maybe (error "stripRoot invalid") id
+              $ stripPrefix root p
+
+  getRefsRecursively _   acc []     = return acc
+  getRefsRecursively dir acc (x:xs) = do
+      isDir <- F.isDirectory x
+      extra <-
+        if isDir then
+          listRefsAcc [] x
+        else
+          let r = stripRoot x in
+          if isValidRefFilepath r then
+            return [fromString $ encodeString r]
+          else 
+            return []
+      getRefsRecursively dir (extra ++ acc) xs
 
 looseHeadsList :: FilePath -> IO [RefName]
 looseHeadsList gitRepo = listRefs (headsPath gitRepo)
