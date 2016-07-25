@@ -170,6 +170,8 @@ inflateNew = do
         inflateInit2 zstr defaultWindowBits
         newForeignPtr c_free_z_stream_inflate zstr
 
+data StrictPair a b = StrictPair !a !b
+
 inflateToSize inflate sz isLastBlock ibs nextBs = withForeignPtr inflate $ \zstr -> do
         let boundSz = min defaultChunkSize sz
         -- create an output buffer
@@ -181,7 +183,7 @@ inflateToSize inflate sz isLastBlock ibs nextBs = withForeignPtr inflate $ \zstr
                 return (bs, rbs)
         where
                 loop zstr nbs = do
-                        (ai, streamEnd) <- inflateOneInput zstr nbs
+                        StrictPair ai streamEnd <- inflateOneInput zstr nbs
                         ao <- c_get_avail_out zstr
                         if (isLastBlock && streamEnd) || (not isLastBlock && ao == 0)
                                 then return $ bsTakeLast ai nbs
@@ -197,5 +199,5 @@ inflateToSize inflate sz isLastBlock ibs nextBs = withForeignPtr inflate $ \zstr
                         when (r < 0 && r /= (-5)) $ do
                                 throwIO $ ZlibException $ fromIntegral r
                         ai <- c_get_avail_in zstr
-                        return (ai, r == 1)
+                        return $ StrictPair ai (r == 1)
                 bsTakeLast len bs = B.drop (B.length bs - fromIntegral len) bs
